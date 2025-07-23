@@ -4,6 +4,9 @@ let currentSection = 'grounds';
 let bookingsCache = [];
 let selectedBookingId = null;
 
+
+const BASE_API_URL = 'http://localhost:4000';
+
 // Check if already logged in
 if (token) {
     showMainContent();
@@ -21,7 +24,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     const password = document.getElementById('password').value;
 
     try {
-        const response = await fetch('/api/admin/login', {
+        const response = await fetch(`${BASE_API_URL}/api/admin/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password })
@@ -134,7 +137,7 @@ let editingGroundId = null;
 
 window.editGround = async function(id) {
   try {
-    const response = await fetch(`/api/admin/grounds`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const response = await fetch(`${BASE_API_URL}/api/admin/grounds`, { headers: { 'Authorization': `Bearer ${token}` } });
     const grounds = await response.json();
     const ground = grounds.find(g => g._id === id);
     if (!ground) return alert('Ground not found!');
@@ -174,7 +177,8 @@ window.editGround = async function(id) {
     document.getElementById('ownerName').value = ground.owner.name;
     document.getElementById('ownerEmail').value = ground.owner.email;
     document.getElementById('ownerContact').value = ground.owner.contact;
-    document.getElementById('ownerPassword').value = '';
+    document.getElementById('ownerPassword').value = ground.owner.password || '';
+    document.getElementById('ownerUserId').value = ground.owner.userId || '';
     // Rating
     document.getElementById('groundRating').value = ground.rating?.average || 0;
     document.getElementById('groundRatingCount').value = ground.rating?.count || 0;
@@ -231,7 +235,8 @@ groundForm.addEventListener('submit', async (e) => {
             email: document.getElementById('ownerEmail').value,
             contact: document.getElementById('ownerContact').value,
             password: document.getElementById('ownerPassword').value,
-            verified: true
+            verified: true,
+            userId: document.getElementById('ownerUserId').value || undefined
         },
         rating: {
             average: Number(document.getElementById('groundRating').value) || 0,
@@ -273,7 +278,7 @@ groundForm.addEventListener('submit', async (e) => {
     try {
         let response, data;
         if (editingGroundId) {
-            response = await fetch(`http://localhost:3001/api/grounds/${editingGroundId}`, {
+            response = await fetch(`${BASE_API_URL}/api/admin/grounds/${editingGroundId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -283,7 +288,7 @@ groundForm.addEventListener('submit', async (e) => {
             });
             data = await response.json();
         } else {
-            response = await fetch(`http://localhost:3001/api/grounds`, {
+            response = await fetch(`${BASE_API_URL}/api/admin/grounds`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -317,7 +322,7 @@ hideAddGroundForm = function() {
 
 async function loadGrounds() {
     try {
-        const response = await fetch(`http://localhost:3001/api/admin/grounds`, {
+        const response = await fetch(`${BASE_API_URL}/api/admin/grounds`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
@@ -332,12 +337,16 @@ async function loadGrounds() {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        const grounds = await response.json();
+        let grounds = await response.json();
         
         // Ensure grounds is an array
         if (!Array.isArray(grounds)) {
-            console.error('Expected array of grounds, got:', grounds);
-            return;
+            if (grounds && Array.isArray(grounds.grounds)) {
+                grounds = grounds.grounds;
+            } else {
+                console.error('Expected array of grounds, got:', grounds);
+                return;
+            }
         }
         
         const tbody = document.getElementById('groundsTableBody');
@@ -384,7 +393,7 @@ async function deleteGround(id) {
     if (!confirm('Are you sure you want to delete this ground?')) return;
     
     try {
-        const response = await fetch(`http://localhost:3001/api/admin/grounds/${id}`, {
+        const response = await fetch(`${BASE_API_URL}/api/admin/grounds/${id}`, {
     method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
   });
@@ -426,7 +435,7 @@ document.getElementById('locationForm').addEventListener('submit', async (e) => 
     };
 
     try {
-        const response = await fetch(`http://localhost:3001/api/admin/locations`, {
+        const response = await fetch(`${BASE_API_URL}/api/admin/locations`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -451,7 +460,7 @@ document.getElementById('locationForm').addEventListener('submit', async (e) => 
 
 async function loadLocations() {
     try {
-        const response = await fetch(`http://localhost:3001/api/admin/locations`, {
+        const response = await fetch(`${BASE_API_URL}/api/admin/locations`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
@@ -466,61 +475,36 @@ async function loadLocations() {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        const locations = await response.json();
+        let locations = await response.json();
         
         // Ensure locations is an array
         if (!Array.isArray(locations)) {
-            console.error('Expected array of locations, got:', locations);
-            return;
+            if (locations && Array.isArray(locations.locations)) {
+                locations = locations.locations;
+            } else {
+                console.error('Expected array of locations, got:', locations);
+                return;
+            }
         }
         
-        const tbody = document.getElementById('locationsTableBody');
-        tbody.innerHTML = '';
+        const dropdown = document.getElementById('groundCity');
+        dropdown.innerHTML = '<option value="">Select City</option>';
         
         locations.forEach(location => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${location.id}</td>
-                <td>${location.name}</td>
-                <td>${location.state}</td>
-                <td>${location.popular ? 'Yes' : 'No'}</td>
-                <td>
-                    <button onclick="editLocation('${location.id}')" class="btn-small">Edit</button>
-                    <button onclick="deleteLocation('${location.id}')" class="btn-small btn-danger">Delete</button>
-                </td>
-            `;
-            tbody.appendChild(row);
+            const option = document.createElement('option');
+            option.value = location.id;
+            option.textContent = `${location.name}, ${location.state}`;
+            dropdown.appendChild(option);
         });
     } catch (error) {
-        console.error('Error loading locations:', error);
-        alert('Error loading locations: ' + error.message);
-    }
-}
-
-async function deleteLocation(id) {
-    if (!confirm('Are you sure you want to delete this location?')) return;
-    
-    try {
-        const response = await fetch(`http://localhost:3001/api/admin/locations/${id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        if (response.ok) {
-            alert('Location deleted successfully!');
-    loadLocations();
-            populateCityDropdown();
-  } else {
-            alert('Error deleting location');
-        }
-    } catch (error) {
-        alert('Error: ' + error.message);
+        console.error('Error loading cities:', error);
+        alert('Error loading cities: ' + error.message);
     }
 }
 
 async function populateCityDropdown() {
     try {
-        const response = await fetch(`http://localhost:3001/api/admin/locations`, {
+        const response = await fetch(`${BASE_API_URL}/api/admin/locations`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
@@ -535,12 +519,16 @@ async function populateCityDropdown() {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        const locations = await response.json();
+        let locations = await response.json();
         
         // Ensure locations is an array
         if (!Array.isArray(locations)) {
-            console.error('Expected array of locations, got:', locations);
-            return;
+            if (locations && Array.isArray(locations.locations)) {
+                locations = locations.locations;
+            } else {
+                console.error('Expected array of locations, got:', locations);
+                return;
+            }
         }
         
         const dropdown = document.getElementById('groundCity');
@@ -562,7 +550,7 @@ async function loadBookings() {
   const token = localStorage.getItem('adminToken');
   if (!token) return;
   try {
-    const response = await fetch(`http://localhost:3001/api/admin/bookings`, {
+    const response = await fetch(`${BASE_API_URL}/api/admin/bookings`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await response.json();
@@ -603,7 +591,7 @@ function renderBookingsTable(bookings) {
     btn.onclick = async function() {
       const id = btn.getAttribute('data-confirm-id');
       try {
-        const response = await fetch(`http://localhost:3001/api/admin/bookings/${id}`, {
+        const response = await fetch(`${BASE_API_URL}/api/admin/bookings/${id}`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -671,7 +659,7 @@ window.viewBooking = function(id) {
   document.getElementById('bookingStatusSelect').onchange = async function() {
     const newStatus = this.value;
     try {
-      const response = await fetch(`http://localhost:3001/api/admin/bookings/${id}`, {
+      const response = await fetch(`${BASE_API_URL}/api/admin/bookings/${id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -693,7 +681,74 @@ window.viewBooking = function(id) {
   };
   // Attach modal button handlers
   document.getElementById('editBookingBtn').onclick = function() {
-    alert('Edit booking feature coming soon!');
+    // Show edit form in modal
+    const editFormHtml = `
+      <form id="editBookingForm">
+        <label>Status:
+          <select name="status" id="editStatus">
+            ${statusOptions.map(opt => `<option value="${opt}" ${booking.status===opt?'selected':''}>${opt}</option>`).join('')}
+          </select>
+        </label><br>
+        <label>Date:
+          <input type="date" id="editDate" value="${booking.bookingDate ? new Date(booking.bookingDate).toISOString().split('T')[0] : ''}" />
+        </label><br>
+        <label>Start Time:
+          <input type="text" id="editStartTime" value="${booking.timeSlot ? booking.timeSlot.startTime : ''}" placeholder="e.g. 10:00" />
+        </label><br>
+        <label>End Time:
+          <input type="text" id="editEndTime" value="${booking.timeSlot ? booking.timeSlot.endTime : ''}" placeholder="e.g. 12:00" />
+        </label><br>
+        <label>Player Details (JSON):
+          <textarea id="editPlayerDetails" rows="3">${booking.playerDetails ? JSON.stringify(booking.playerDetails, null, 2) : ''}</textarea>
+        </label><br>
+        <button type="submit" class="btn-primary">Save</button>
+        <button type="button" id="cancelEditBtn" class="btn-secondary">Cancel</button>
+      </form>
+    `;
+    document.getElementById('bookingDetailsContent').innerHTML = editFormHtml;
+    document.getElementById('editBookingForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const status = document.getElementById('editStatus').value;
+      const bookingDate = document.getElementById('editDate').value;
+      const startTime = document.getElementById('editStartTime').value;
+      const endTime = document.getElementById('editEndTime').value;
+      let playerDetails;
+      try {
+        playerDetails = JSON.parse(document.getElementById('editPlayerDetails').value);
+      } catch (err) {
+        alert('Player Details must be valid JSON');
+        return;
+      }
+      const update = {
+        status,
+        bookingDate,
+        timeSlot: { startTime, endTime },
+        playerDetails
+      };
+      try {
+        const response = await fetch(`${BASE_API_URL}/api/admin/bookings/${id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(update)
+        });
+        const data = await response.json();
+        if (data.success) {
+          alert('Booking updated!');
+          document.getElementById('bookingModal').style.display = 'none';
+          loadBookings();
+        } else {
+          alert('Error updating booking: ' + (data.message || ''));
+        }
+      } catch (err) {
+        alert('Error updating booking: ' + err.message);
+      }
+    };
+    document.getElementById('cancelEditBtn').onclick = function() {
+      window.viewBooking(id);
+    };
   };
   document.getElementById('deleteBookingBtn').onclick = function() {
     document.getElementById('bookingModal').style.display = 'none';
@@ -718,7 +773,7 @@ window.closeDeleteBookingModal = function() {
 document.getElementById('confirmDeleteBookingBtn').onclick = async function() {
   if (!selectedBookingId) return;
   try {
-    const response = await fetch(`http://localhost:3001/api/admin/bookings/${selectedBookingId}`, {
+    const response = await fetch(`${BASE_API_URL}/api/admin/bookings/${selectedBookingId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -734,8 +789,3 @@ document.getElementById('confirmDeleteBookingBtn').onclick = async function() {
     alert('Error deleting booking: ' + err.message);
   }
 };
-
-// Edit Booking (placeholder for now)
-document.getElementById('editBookingBtn').onclick = function() {
-  alert('Edit booking feature coming soon!');
-}; 

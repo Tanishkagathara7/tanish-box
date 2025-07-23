@@ -251,6 +251,29 @@ router.get("/my-bookings", authMiddleware, async (req, res) => {
 });
 
 // Get booking details by ID (authenticated)
+router.get('/owner', authMiddleware, async (req, res) => {
+  try {
+    console.log("[GET /bookings/owner] Incoming request");
+    const user = req.user;
+    console.log("[GET /bookings/owner] User:", user);
+    if (!user || user.role !== 'ground_owner') {
+      console.log("[GET /bookings/owner] Access denied: not a ground owner");
+      return res.status(403).json({ success: false, message: 'Access denied. Not a ground owner.' });
+    }
+    // Find all grounds owned by this user
+    const grounds = await Ground.find({ 'owner.userId': req.userId });
+    console.log("[GET /bookings/owner] Grounds found:", grounds.length);
+    const groundIds = grounds.map(g => g._id);
+    // Find all bookings for these grounds
+    const bookings = await Booking.find({ groundId: { $in: groundIds } });
+    console.log("[GET /bookings/owner] Bookings found:", bookings.length);
+    res.json({ success: true, bookings });
+  } catch (error) {
+    console.error("[GET /bookings/owner] Error:", error);
+    res.status(500).json({ success: false, message: 'Failed to fetch bookings', error: error.message });
+  }
+});
+
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const bookingId = req.params.id;
@@ -360,24 +383,6 @@ router.get("/ground/:groundId/:date", async (req, res) => {
       success: false, 
       message: "Failed to fetch ground bookings" 
     });
-  }
-});
-
-// Get all bookings for grounds owned by the logged-in ground owner
-router.get("/owner", authMiddleware, async (req, res) => {
-  try {
-    const user = req.user;
-    if (!user || user.role !== "ground_owner") {
-      return res.status(403).json({ success: false, message: "Access denied. Not a ground owner." });
-    }
-    // Find all grounds owned by this user
-    const grounds = await Ground.find({ "owner.userId": req.userId }, { _id: 1 });
-    const groundIds = grounds.map(g => g._id);
-    // Find all bookings for these grounds
-    const bookings = await Booking.find({ groundId: { $in: groundIds } }).populate("userId", "name email");
-    res.json({ success: true, bookings });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch bookings", error: error.message });
   }
 });
 
@@ -498,5 +503,54 @@ router.get("/demo/:id", (req, res) => {
   };
   res.json({ success: true, booking: { ...booking, id: booking._id, ground: safeGround, pricing } });
 });
+
+// --- ADMIN ROUTER ---
+const adminRouter = express.Router();
+
+// GET /api/admin/bookings - get all bookings
+adminRouter.get("/", async (req, res) => {
+  try {
+    const bookings = await Booking.find({}).populate("userId", "name email").populate("groundId", "name location");
+    res.json({ success: true, bookings });
+  } catch (error) {
+    console.error("Error fetching admin bookings:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch bookings" });
+  }
+});
+
+// PATCH /api/admin/bookings/:id - update a booking
+adminRouter.patch("/:id", async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+    const update = req.body;
+    const allowedFields = [
+      "status",
+      "bookingDate",
+      "timeSlot",
+      "playerDetails",
+      "requirements",
+      "pricing"
+    ];
+    // Only allow updating certain fields
+    const updateData = {};
+    for (const key of allowedFields) {
+      if (update[key] !== undefined) {
+        updateData[key] = update[key];
+      }
+    }
+    const booking = await Booking.findByIdAndUpdate(bookingId, updateData, { new: true })
+      .populate("userId", "name email")
+      .populate("groundId", "name location");
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+    res.json({ success: true, booking });
+  } catch (error) {
+    console.error("Error updating booking:", error);
+    res.status(500).json({ success: false, message: "Failed to update booking" });
+  }
+});
+
+export { adminRouter };
 
 export default router;

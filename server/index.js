@@ -8,10 +8,11 @@ import { Server } from "socket.io";
 // Routes
 import testRoutes from "./routes/test.js";
 import authRoutes from "./routes/auth.js";
-import groundRoutes from "./routes/grounds.js";
-import bookingRoutes from "./routes/bookings.js";
+import groundRoutes, { adminRouter as adminGroundsRouter } from "./routes/grounds.js";
+import bookingRoutes, { adminRouter as adminBookingsRouter } from "./routes/bookings.js";
 import userRoutes from "./routes/users.js";
 import paymentsRoutes from "./routes/payments.js";
+import { adminRouter as adminLocationsRouter } from "./routes/locations.js";
 
 // Initialize dotenv
 dotenv.config();
@@ -28,7 +29,12 @@ const io = new Server(server, {
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:8080"],
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:8080",
+      "http://localhost:4000",
+      "http://localhost:3000" // Allow React frontend
+    ],
     credentials: true,
   }),
 );
@@ -69,9 +75,12 @@ app.set("io", io);
 app.use("/api/test", testRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/grounds", groundRoutes);
+app.use("/api/admin/grounds", adminGroundsRouter);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/admin/bookings", adminBookingsRouter);
 app.use("/api/users", userRoutes);
 app.use("/api/payments", paymentsRoutes);
+app.use("/api/admin/locations", adminLocationsRouter);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

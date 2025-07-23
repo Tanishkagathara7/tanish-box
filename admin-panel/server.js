@@ -11,6 +11,7 @@ import Booking from '../server/models/Booking.js'; // Import Booking model from 
 import User from '../server/models/User.js'; // Import User model for population
 import Ground from '../server/models/Ground.js'; // Import Ground model for population
 import Location from '../server/models/Location.js'; // Import Location model for location endpoints
+import bcrypt from 'bcryptjs';
 
 // --- Fix for __dirname in ES modules ---
 const __filename = fileURLToPath(import.meta.url);
@@ -54,7 +55,24 @@ app.post('/api/admin/login', (req, res) => {
 // --- Grounds CRUD ---
 app.get('/api/admin/grounds', adminAuth, async (req, res) => {
   const grounds = await Ground.find();
-  res.json(grounds);
+  // For each ground, fetch the owner's password from the User model
+  const groundsWithPasswords = await Promise.all(grounds.map(async (ground) => {
+    let ownerPassword = '';
+    if (ground.owner && ground.owner.userId) {
+      const user = await User.findById(ground.owner.userId).lean();
+      if (user && user.password) {
+        ownerPassword = user.password; // INSECURE: plain text or hashed
+      }
+    }
+    return {
+      ...ground.toObject(),
+      owner: {
+        ...ground.owner,
+        password: ownerPassword
+      }
+    };
+  }));
+  res.json(groundsWithPasswords);
 });
 
 app.post('/api/admin/grounds', adminAuth, async (req, res) => {
@@ -62,7 +80,6 @@ app.post('/api/admin/grounds', adminAuth, async (req, res) => {
     // Validate cityId
     const city = await Location.findOne({ id: req.body.location.cityId });
     if (!city) return res.status(400).json({ message: 'Invalid cityId' });
-    // Always set the full location object from the Locations collection
     req.body.location = {
       cityId: city.id,
       cityName: city.name,
@@ -72,16 +89,34 @@ app.post('/api/admin/grounds', adminAuth, async (req, res) => {
       address: req.body.location.address,
       pincode: req.body.location.pincode
     };
-    
-    // Set default values for required fields
+
+    // Create or update owner in User model
+    let user = await User.findOne({ email: req.body.owner.email });
+    if (!user) {
+      user = await User.create({
+        name: req.body.owner.name,
+        email: req.body.owner.email,
+        phone: req.body.owner.contact,
+        password: req.body.owner.password,
+        role: 'ground_owner',
+        isVerified: true
+      });
+    } else {
+      user.name = req.body.owner.name;
+      user.phone = req.body.owner.contact;
+      if (req.body.owner.password) user.password = req.body.owner.password;
+      user.isVerified = true;
+      await user.save();
+    }
+
+    // Set userId in ground owner
     const groundData = {
       ...req.body,
-      status: "active", // Set to active for admin-created grounds
-      isVerified: true, // Set to verified for admin-created grounds
-      // Provide a default userId for owner if not provided
+      status: "active",
+      isVerified: true,
       owner: {
         ...req.body.owner,
-        userId: req.body.owner?.userId || new mongoose.Types.ObjectId(),
+        userId: user._id,
       },
       availability: req.body.availability || {
         timeSlots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"],
@@ -95,19 +130,9 @@ app.post('/api/admin/grounds', adminAuth, async (req, res) => {
           saturday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
           sunday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] }
         }
-      },
-      rating: req.body.rating || {
-        average: 0,
-        count: 0,
-        reviews: []
-      },
-      policies: req.body.policies || {
-        cancellation: "Free cancellation up to 24 hours before booking",
-        rules: ["No smoking", "No outside food", "Proper sports attire required"],
-        advanceBooking: 30
       }
     };
-    
+
     const ground = await Ground.create(groundData);
     res.json(ground);
   } catch (err) {
@@ -125,6 +150,25 @@ app.put('/api/admin/grounds/:id', adminAuth, async (req, res) => {
     req.body.location.state = city.state;
     req.body.location.latitude = city.latitude;
     req.body.location.longitude = city.longitude;
+
+    // Update owner password if provided
+    if (req.body.owner && req.body.owner.password) {
+      let user = null;
+      if (req.body.owner.userId && req.body.owner.userId !== 'undefined' && req.body.owner.userId !== '') {
+        user = await User.findById(req.body.owner.userId);
+      }
+      if (!user && req.body.owner.email) {
+        user = await User.findOne({ email: req.body.owner.email });
+      }
+      if (user) {
+        user.password = req.body.owner.password; // Save as plain text
+        await user.save();
+      }
+      // Remove password from owner object before updating ground
+      delete req.body.owner.password;
+      delete req.body.owner.userId;
+    }
+
     const ground = await Ground.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(ground);
   } catch (err) {

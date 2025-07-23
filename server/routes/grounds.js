@@ -119,8 +119,8 @@ function mapMongoGroundToFallback(groundDoc, bookingsByDate = {}) {
   };
 }
 
-// Get all grounds with filters (MongoDB + fallback for demo)
-router.get("/", async (req, res) => {
+// Refactor: extract handler functions
+async function getAllGroundsHandler(req, res) {
   try {
     const {
       cityId,
@@ -312,10 +312,9 @@ router.get("/", async (req, res) => {
       message: "Failed to fetch grounds",
     });
   }
-});
+}
 
-// Get single ground by ID (MongoDB + fallback for demo)
-router.get("/:id", async (req, res) => {
+async function getGroundByIdHandler(req, res) {
   try {
     let ground = null;
     let bookingsByDate = {};
@@ -408,7 +407,28 @@ router.get("/:id", async (req, res) => {
       message: "Failed to fetch ground details",
     });
   }
+}
+
+router.get("/owner", authMiddleware, async (req, res) => {
+  try {
+    console.log("[GET /grounds/owner] Incoming request");
+    const user = req.user;
+    console.log("[GET /grounds/owner] User:", user);
+    if (!user || user.role !== "ground_owner") {
+      console.log("[GET /grounds/owner] Access denied: not a ground owner");
+      return res.status(403).json({ success: false, message: "Access denied. Not a ground owner." });
+    }
+    const grounds = await Ground.find({ "owner.userId": req.userId });
+    console.log("[GET /grounds/owner] Grounds found:", grounds.length);
+    res.json({ success: true, grounds });
+  } catch (error) {
+    console.error("[GET /grounds/owner] Error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch grounds", error: error.message });
+  }
 });
+
+router.get("/", getAllGroundsHandler);
+router.get("/:id", getGroundByIdHandler);
 
 // Get ground availability for specific date (DEMO)
 router.get("/:id/availability/:date", (req, res) => {
@@ -738,19 +758,12 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// Get all grounds for the logged-in ground owner
-router.get("/owner", authMiddleware, async (req, res) => {
-  try {
-    // Only allow ground owners
-    const user = req.user;
-    if (!user || user.role !== "ground_owner") {
-      return res.status(403).json({ success: false, message: "Access denied. Not a ground owner." });
-    }
-    const grounds = await Ground.find({ "owner.userId": req.userId });
-    res.json({ success: true, grounds });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch grounds", error: error.message });
-  }
-});
+// --- ADMIN ROUTER ---
+// This router exposes the same GET endpoints as the main grounds router, but under /api/admin/grounds for admin panel use.
+const adminRouter = express.Router();
+adminRouter.get("/", getAllGroundsHandler);
+adminRouter.get("/:id", getGroundByIdHandler);
+
+export { adminRouter };
 
 export default router;
