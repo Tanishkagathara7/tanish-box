@@ -9,6 +9,7 @@ import { groundsApi, bookingsApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import PaymentModal from "@/components/PaymentModal";
+import { isMongoObjectId } from "@/lib/utils";
 
 interface Ground {
   _id: string;
@@ -284,6 +285,10 @@ const NewBookingModal: React.FC<NewBookingModalProps> = ({
   };
 
   if (!ground) return null;
+
+  if (!isMongoObjectId(ground._id)) {
+    return <div className="p-6 text-center text-red-600">This ground cannot be booked online.</div>;
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

@@ -21,6 +21,7 @@ import { calculateDistance } from "@/lib/cities";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { isMongoObjectId } from "@/lib/utils";
 
 // Demo data for testimonials
 const testimonials = [
@@ -275,10 +276,8 @@ const Index = () => {
     }
   };
 
-  // Display grounds (already filtered by API)
-  const displayGrounds = useMemo(() => {
-    return grounds;
-  }, [grounds]);
+  // Replace displayGrounds with only real MongoDB grounds
+  const realGrounds = useMemo(() => grounds.filter(g => isMongoObjectId(g._id)), [grounds]);
 
   const handleCitySelect = (city: City) => {
     setSelectedCity(city);
@@ -302,7 +301,10 @@ const Index = () => {
       toast.error("Please login to book a ground");
       return;
     }
-
+    if (!isMongoObjectId(groundId)) {
+      toast.error("This ground cannot be booked online.");
+      return;
+    }
     const ground = grounds.find((g) => g._id === groundId);
     if (ground) {
       setSelectedGround(ground);
@@ -312,7 +314,7 @@ const Index = () => {
 
   const handleViewDetails = (groundId: string) => {
     console.log("View details clicked for ground ID:", groundId);
-    console.log("Ground data:", displayGrounds.find(g => g._id === groundId));
+    console.log("Ground data:", realGrounds.find(g => g._id === groundId));
     navigate(`/ground/${groundId}`);
   };
 
@@ -453,7 +455,7 @@ const Index = () => {
                   Cricket Grounds in {selectedCity.name}
                 </h2>
                 <p className="text-gray-600">
-                  {displayGrounds.length} amazing grounds available for booking
+                  {realGrounds.length} amazing grounds available for booking
                 </p>
               </div>
               <div className="flex items-center space-x-2">
@@ -552,9 +554,9 @@ const Index = () => {
                   </Card>
                 ))}
               </div>
-            ) : displayGrounds.length > 0 ? (
+            ) : realGrounds.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {displayGrounds.map((ground) => (
+                {realGrounds.map((ground) => (
                   <GroundCard
                     key={ground._id}
                     ground={ground}

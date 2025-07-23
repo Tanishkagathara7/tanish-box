@@ -1,4 +1,5 @@
 import axios from "axios";
+import { isMongoObjectId } from "./utils";
 
 const API_BASE_URL = "http://localhost:3001/api";
 
@@ -106,25 +107,15 @@ export const groundsApi = {
 
 // Bookings API
 export const bookingsApi = {
-  createBooking: (data: {
-    groundId: string;
-    bookingDate: string;
-    startTime: string;
-    endTime: string;
-    playerDetails: {
-      teamName?: string;
-      playerCount: number;
-      contactPerson: {
-        name: string;
-        phone: string;
-        email?: string;
-      };
-    };
-    requirements?: string;
-  }) => api.post("/bookings", {
-    ...data,
-    timeSlot: `${data.startTime}-${data.endTime}`
-  }),
+  createBooking: async (data: any) => {
+    if (!isMongoObjectId(data.groundId)) {
+      throw new Error("This ground cannot be booked online.");
+    }
+    return api.post("/bookings", {
+      ...data,
+      timeSlot: `${data.startTime}-${data.endTime}`
+    });
+  },
 
   getMyBookings: (params?: {
     status?: string;

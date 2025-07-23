@@ -1,0 +1,202 @@
+/* Cricket-inspired light theme for Owner Panel */
+body, .owner-panel-root {
+  font-family: 'Segoe UI', 'Inter', Arial, sans-serif;
+  background: #f7fafc;
+  color: #222;
+  margin: 0;
+}
+
+.owner-panel-container {
+  max-width: 1200px;
+  margin: 40px auto;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 4px 32px #0002;
+  padding: 0;
+}
+
+.owner-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 32px 40px 0 40px;
+}
+
+.owner-panel-title {
+  font-size: 32px;
+  font-weight: 800;
+  color: #1b5e20;
+  letter-spacing: 1px;
+}
+
+.owner-panel-section {
+  padding: 0 40px 40px 40px;
+}
+
+.owner-panel-section-title {
+  margin-top: 36px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #388e3c;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 8px;
+}
+
+.owner-panel-card-list {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin: 24px 0 36px 0;
+}
+
+.owner-panel-card {
+  min-width: 260px;
+  flex: 1;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px #0001;
+  padding: 24px;
+  margin-bottom: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.owner-panel-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 8px #0001;
+  font-size: 15px;
+  margin-top: 8px;
+}
+
+.owner-panel-table th {
+  padding: 14px;
+  border-bottom: 2px solid #c8e6c9;
+  font-weight: 700;
+  color: #1b5e20;
+  background: #e8f5e9;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.owner-panel-table tr {
+  transition: background 0.2s;
+}
+
+.owner-panel-table tr:nth-child(even) {
+  background: #f9fbe7;
+}
+
+.owner-panel-table tr:nth-child(odd) {
+  background: #fff;
+}
+
+.owner-panel-table td {
+  padding: 12px;
+}
+
+.owner-panel-btn {
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px #388e3c22;
+  background: #43a047;
+  color: #fff;
+  margin-right: 8px;
+  transition: background 0.2s;
+}
+.owner-panel-btn.outline {
+  background: #fff;
+  color: #388e3c;
+  border: 1px solid #388e3c;
+}
+.owner-panel-btn.danger {
+  background: #e53935;
+  color: #fff;
+}
+.owner-panel-btn.secondary {
+  background: #1976d2;
+  color: #fff;
+}
+.owner-panel-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  margin-right: 6px;
+}
+.owner-panel-badge.pending {
+  background: #fffde7;
+  color: #fbc02d;
+}
+.owner-panel-badge.confirmed {
+  background: #e3fcec;
+  color: #388e3c;
+}
+.owner-panel-badge.completed {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+.owner-panel-badge.cancelled {
+  background: #ffebee;
+  color: #e53935;
+}
+.owner-panel-avatar {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #43a047;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  text-align: center;
+  line-height: 32px;
+  margin-right: 8px;
+}
+.owner-panel-empty-state {
+  text-align: center;
+  margin: 48px 0;
+  color: #888;
+}
+.owner-panel-empty-state img {
+  width: 80px;
+  margin-bottom: 16px;
+  opacity: 0.7;
+}
+.owner-panel-empty-state .title {
+  font-size: 20px;
+  font-weight: 500;
+}
+.owner-panel-empty-state .desc {
+  font-size: 15px;
+  color: #aaa;
+  margin-top: 4px;
+}
+@media (max-width: 800px) {
+  .owner-panel-header, .owner-panel-section {
+    padding: 16px 8px 0 8px;
+  }
+  .owner-panel-section {
+    padding-bottom: 16px;
+  }
+  .owner-panel-card-list {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .owner-panel-card {
+    min-width: 0;
+    padding: 16px;
+  }
+  .owner-panel-table th, .owner-panel-table td {
+    padding: 8px;
+    font-size: 14px;
+  }
+} 

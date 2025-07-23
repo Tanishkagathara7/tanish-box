@@ -3,6 +3,7 @@ import { fallbackGrounds } from "../data/fallbackGrounds.js";
 import { authMiddleware } from "../middleware/auth.js";
 import Booking from "../models/Booking.js";
 import Ground from "../models/Ground.js";
+import mongoose from "mongoose";
 
 const router = express.Router();
 
@@ -51,6 +52,11 @@ router.post("/", authMiddleware, async (req, res) => {
       requirements,
       userId
     });
+
+    // Validate groundId is a MongoDB ObjectId
+    if (!/^[0-9a-fA-F]{24}$/.test(groundId)) {
+      return res.status(400).json({ success: false, message: "This ground cannot be booked online." });
+    }
 
     // Validate required fields
     if (!groundId || !bookingDate || !timeSlot || !playerDetails) {
@@ -263,10 +269,22 @@ router.get('/owner', authMiddleware, async (req, res) => {
     // Find all grounds owned by this user
     const grounds = await Ground.find({ 'owner.userId': req.userId });
     console.log("[GET /bookings/owner] Grounds found:", grounds.length);
-    const groundIds = grounds.map(g => g._id);
-    // Find all bookings for these grounds
-    const bookings = await Booking.find({ groundId: { $in: groundIds } });
+    // Use string form of ground IDs for $in query
+    const groundIds = grounds.map(g => g._id.toString());
+    const bookings = await Booking.find({ groundId: { $in: groundIds } })
+      .populate('userId', 'name email')
+      .populate('groundId', 'name location');
     console.log("[GET /bookings/owner] Bookings found:", bookings.length);
+    if (bookings.length === 0) {
+      // Print all bookings for debugging
+      const allBookings = await Booking.find({});
+      console.log("All bookings in DB:", allBookings.map(b => ({
+        _id: b._id,
+        groundId: b.groundId,
+        groundIdType: typeof b.groundId,
+        bookingId: b.bookingId
+      })));
+    }
     res.json({ success: true, bookings });
   } catch (error) {
     console.error("[GET /bookings/owner] Error:", error);

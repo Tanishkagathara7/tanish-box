@@ -23,6 +23,7 @@ import { groundsApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { isMongoObjectId } from "@/lib/utils";
 
 const GroundDetails = () => {
   const { id } = useParams();
@@ -39,6 +40,11 @@ const GroundDetails = () => {
   const [slotRetryCount, setSlotRetryCount] = useState(0);
 
   useEffect(() => {
+    if (id && !isMongoObjectId(id)) {
+      toast.error("This ground cannot be booked online.");
+      navigate("/");
+      return;
+    }
     if (id) {
       fetchGroundDetails();
       fetchReviews();
