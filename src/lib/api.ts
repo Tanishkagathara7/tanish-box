@@ -111,10 +111,13 @@ export const bookingsApi = {
     if (!isMongoObjectId(data.groundId)) {
       throw new Error("This ground cannot be booked online.");
     }
-    return api.post("/bookings", {
+    
+    const requestData = {
       ...data,
       timeSlot: `${data.startTime}-${data.endTime}`
-    });
+    };
+    
+    return api.post("/bookings", requestData);
   },
 
   getMyBookings: (params?: {

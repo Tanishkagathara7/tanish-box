@@ -159,9 +159,39 @@ const NewBookingModal: React.FC<NewBookingModalProps> = ({
     if (startIdx === -1) return [];
     const maxDuration = 6;
     const endTimes: { value: string; label: string; duration: number }[] = [];
+    
+    // Get all booked time ranges for overlap checking
+    const bookedRanges = availableSlots
+      .filter(slot => !slot.isAvailable)
+      .map(slot => {
+        const [start, end] = slot.slot.split('-');
+        return {
+          start: new Date(`2000-01-01 ${start}`),
+          end: new Date(`2000-01-01 ${end}`)
+        };
+      });
+    
+    const startTimeDate = new Date(`2000-01-01 ${startSlotObj.slot.split('-')[0]}`);
+    
     for (let dur = 1; dur <= maxDuration; dur++) {
       const endIdx = startIdx + dur;
       if (endIdx > availableSlots.length) break;
+      
+      const endSlot = availableSlots[endIdx - 1];
+      const endTimeDate = new Date(`2000-01-01 ${endSlot.slot.split('-')[1]}`);
+      
+      // Check if this time range overlaps with any booked range
+      let hasOverlap = false;
+      for (const bookedRange of bookedRanges) {
+        if (startTimeDate < bookedRange.end && endTimeDate > bookedRange.start) {
+          hasOverlap = true;
+          break;
+        }
+      }
+      
+      if (hasOverlap) break;
+      
+      // Also check if all intermediate slots are available
       let allAvailable = true;
       for (let i = startIdx; i < endIdx; i++) {
         if (!availableSlots[i] || !availableSlots[i].isAvailable) {
@@ -169,8 +199,8 @@ const NewBookingModal: React.FC<NewBookingModalProps> = ({
           break;
         }
       }
+      
       if (allAvailable) {
-        const endSlot = availableSlots[endIdx - 1];
         endTimes.push({
           value: endSlot.slot.split('-')[1],
           label: endSlot.label.split(' - ')[1],
@@ -240,7 +270,7 @@ const NewBookingModal: React.FC<NewBookingModalProps> = ({
     const bookingData = {
       groundId: ground._id,
       bookingDate: formattedDate,
-      startTime: selectedStartSlotObj.slot,
+      startTime: selectedStartSlotObj.slot.split('-')[0], // Extract just the start time
       endTime: selectedEndTime,
       playerDetails: {
         teamName: teamName || undefined,
@@ -253,6 +283,7 @@ const NewBookingModal: React.FC<NewBookingModalProps> = ({
       },
       requirements: undefined,
     };
+    
     try {
       const response = await bookingsApi.createBooking(bookingData);
       if (response && (response as any).success) {

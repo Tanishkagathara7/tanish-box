@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, Filter, Menu, X, User, MapPin, LogOut, Heart, BookOpen } from "lucide-react";
+import { Search, Filter, Menu, X, User, MapPin, LogOut, Heart, BookOpen, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,6 +20,10 @@ interface NavbarProps {
   onCitySelect?: () => void;
   onSearch?: (query: string) => void;
   onFilterToggle?: () => void;
+  notifications?: any[];
+  showNotifDropdown?: boolean;
+  setShowNotifDropdown?: (v: boolean) => void;
+  clearNotifications?: () => void;
 }
 
 const Navbar = ({
@@ -27,6 +31,10 @@ const Navbar = ({
   onCitySelect,
   onSearch,
   onFilterToggle,
+  notifications = [],
+  showNotifDropdown = false,
+  setShowNotifDropdown = () => {},
+  clearNotifications = undefined,
 }: NavbarProps) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -143,6 +151,73 @@ const Navbar = ({
               {/* Auth Section */}
               {isAuthenticated && user ? (
                 <div className="flex items-center space-x-3">
+                  {/* Notification Bell */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowNotifDropdown(!showNotifDropdown)}
+                      className="relative bg-white rounded-full shadow-lg p-2 hover:bg-gray-100 transition-all"
+                      aria-label="Show notifications"
+                    >
+                      <Bell className="w-6 h-6 text-cricket-green" />
+                      {notifications.length > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 font-bold">{notifications.length}</span>
+                      )}
+                    </button>
+                    {/* Notification Dropdown with overlay and improved style */}
+                    {showNotifDropdown && (
+                      <>
+                        {/* Overlay */}
+                        <div
+                          className="fixed inset-0 bg-black/20 z-40"
+                          onClick={() => setShowNotifDropdown(false)}
+                        />
+                        {/* Dropdown - fixed to right side below bell */}
+                        <div className="fixed top-20 right-8 w-96 max-w-[90vw] bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 animate-fade-in flex flex-col" style={{ minWidth: 320 }}>
+                          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50 rounded-t-2xl">
+                            <span className="font-semibold text-lg text-gray-900">Notifications</span>
+                            <button onClick={() => setShowNotifDropdown(false)} className="text-gray-400 hover:text-gray-700 text-xl font-bold">&times;</button>
+                          </div>
+                          <div className="overflow-y-auto max-h-96 px-3 py-2">
+                            {notifications.length === 0 && (
+                              <div className="text-center text-gray-500 py-8">No notifications</div>
+                            )}
+                            {notifications.map((notif) => (
+                              <div key={notif.id} className={`rounded-lg p-4 mb-2 flex items-center gap-4 ${notif.status === 'confirmed' ? 'bg-green-50 border-l-4 border-green-500' : 'bg-red-50 border-l-4 border-red-500'}`}>
+                                <div className="flex-shrink-0">
+                                  {notif.status === 'confirmed' ? (
+                                    <span className="inline-block w-8 h-8 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-xl">✔️</span>
+                                  ) : (
+                                    <span className="inline-block w-8 h-8 bg-red-100 text-red-700 rounded-full flex items-center justify-center text-xl">❌</span>
+                                  )}
+                                </div>
+                                <div className="flex-1">
+                                  <div className="font-semibold text-lg">
+                                    {notif.status === 'confirmed' ? 'Booking Confirmed!' : 'Booking Cancelled'}
+                                  </div>
+                                  <div className="text-gray-700 text-sm mt-1">
+                                    <b>Ground:</b> {notif.ground}<br />
+                                    <b>Date:</b> {notif.date ? new Date(notif.date).toLocaleDateString() : ''}<br />
+                                    <b>Time:</b> {notif.time}
+                                    {notif.status === 'cancelled' && notif.reason && (
+                                      <div className="text-red-700 mt-1"><b>Reason:</b> {notif.reason}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {clearNotifications && notifications.length > 0 && (
+                            <button
+                              onClick={() => { clearNotifications(); setShowNotifDropdown(false); }}
+                              className="text-gray-500 hover:text-red-600 text-sm py-2 border-t border-gray-100 w-full bg-transparent font-medium rounded-b-2xl transition-colors"
+                            >
+                              Clear All
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                   {/* User Menu */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

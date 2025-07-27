@@ -758,10 +758,124 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+// Admin-specific handler that shows ALL grounds (not just active/verified)
+async function getAllGroundsAdminHandler(req, res) {
+  try {
+    const {
+      cityId,
+      search,
+      minPrice,
+      maxPrice,
+      amenities,
+      pitchType,
+      lighting,
+      parking,
+      minRating,
+      lat,
+      lng,
+      maxDistance,
+      page = 1,
+      limit = 50, // Higher limit for admin
+    } = req.query;
+
+    let grounds = [];
+    let total = 0;
+
+    try {
+      // Admin can see ALL grounds, not just active/verified ones
+      const filter = {};
+      if (cityId) filter["location.cityId"] = cityId;
+      if (search) {
+        filter.$or = [
+          { name: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+          { amenities: { $in: [new RegExp(search, "i")] } },
+        ];
+      }
+      if (minPrice || maxPrice) {
+        filter["price.perHour"] = {};
+        if (minPrice) filter["price.perHour"].$gte = Number(minPrice);
+        if (maxPrice) filter["price.perHour"].$lte = Number(maxPrice);
+      }
+      if (amenities) {
+        const amenitiesArray = Array.isArray(amenities) ? amenities : [amenities];
+        filter.amenities = { $all: amenitiesArray };
+      }
+      if (pitchType && pitchType !== "all") {
+        filter["features.pitchType"] = pitchType;
+      }
+      if (lighting === "true") {
+        filter["features.lighting"] = true;
+      }
+      if (parking === "true") {
+        filter["features.parking"] = true;
+      }
+      if (minRating) {
+        filter["rating.average"] = { $gte: Number(minRating) };
+      }
+      
+      const skip = (Number(page) - 1) * Number(limit);
+      grounds = await Ground.find(filter)
+        .populate("owner.userId", "name email phone")
+        .sort({ createdAt: -1 }) // Sort by creation date for admin
+        .skip(skip)
+        .limit(Number(limit));
+      total = await Ground.countDocuments(filter);
+      
+      // Calculate distances if coordinates provided
+      if (lat && lng) {
+        grounds = grounds
+          .map((ground) => {
+            const distance = ground.location && ground.location.latitude && ground.location.longitude
+              ? calculateDistance(Number(lat), Number(lng), ground.location.latitude, ground.location.longitude)
+              : null;
+            return { ...ground.toObject(), distance };
+          })
+          .filter((ground) =>
+            maxDistance && ground.distance !== null ? ground.distance <= Number(maxDistance) : true,
+          )
+          .sort((a, b) => (a.distance || 0) - (b.distance || 0));
+      }
+
+      // Map to fallback structure for consistency
+      grounds = grounds.map((ground) => mapMongoGroundToFallback(ground));
+
+      res.json({
+        success: true,
+        grounds,
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
+      });
+    } catch (dbError) {
+      console.error("Database error in admin grounds:", dbError);
+      // Fallback to demo data if database fails
+      grounds = fallbackGrounds.slice(0, Number(limit));
+      res.json({
+        success: true,
+        grounds,
+        total: fallbackGrounds.length,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(fallbackGrounds.length / Number(limit)),
+        fallback: true,
+      });
+    }
+  } catch (error) {
+    console.error("Admin grounds error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch grounds",
+      error: error.message,
+    });
+  }
+}
+
 // --- ADMIN ROUTER ---
 // This router exposes the same GET endpoints as the main grounds router, but under /api/admin/grounds for admin panel use.
 const adminRouter = express.Router();
-adminRouter.get("/", getAllGroundsHandler);
+adminRouter.get("/", getAllGroundsAdminHandler); // Use admin-specific handler
 adminRouter.get("/:id", getGroundByIdHandler);
 
 export { adminRouter };

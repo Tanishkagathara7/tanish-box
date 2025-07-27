@@ -1,262 +1,1269 @@
-import React, { useState, useEffect } from "react";
-import { FiMenu, FiLogOut, FiUser, FiHome, FiClipboard, FiSettings } from "react-icons/fi";
-import { Toaster, toast } from "react-hot-toast";
-import { FaCheckCircle, FaTimesCircle, FaClock, FaUserCircle } from "react-icons/fa";
-import { MdOutlineEmail } from "react-icons/md";
-import { BsTelephone } from "react-icons/bs";
-import "./index.css";
-
-const SIDEBAR_LINKS = [
-  { name: "Dashboard", icon: <FiHome />, key: "dashboard" },
-  { name: "Bookings", icon: <FiClipboard />, key: "bookings" },
-  { name: "Profile", icon: <FiUser />, key: "profile" },
-  { name: "Settings", icon: <FiSettings />, key: "settings" },
-];
-
-function Avatar({ name }) {
-  if (!name) return <FaUserCircle className="w-8 h-8 text-green-700" />;
-  const initials = name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
-  return (
-    <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-700 text-white font-bold text-lg">
-      {initials}
-    </span>
-  );
+import React, { useState, useEffect, useRef } from 'react';
+import { format } from 'date-fns';
+// Toast system
+function useToast() {
+  const [toasts, setToasts] = useState([]);
+  function showToast(message, type = 'info') {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts(ts => [...ts, { id, message, type }]);
+    setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 3000);
+  }
+  function Toasts() {
+    return (
+      <div style={{ position: 'fixed', top: 24, right: 24, zIndex: 2000 }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{ background: t.type === 'error' ? '#e53935' : '#388e3c', color: '#fff', padding: '12px 24px', borderRadius: 8, marginBottom: 10, fontWeight: 600, boxShadow: '0 2px 8px #0002', minWidth: 180 }}>{t.message}</div>
+        ))}
+      </div>
+    );
+  }
+  return [Toasts, showToast];
 }
 
-function StatusBadge({ status }) {
-  const map = {
-    pending: "bg-yellow-100 text-yellow-800",
-    confirmed: "bg-green-100 text-green-800",
-    completed: "bg-blue-100 text-blue-800",
-    cancelled: "bg-red-100 text-red-800",
+function Login({ onLogin }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      const res = await fetch('http://localhost:3001/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailOrPhone: email, password }),
+      });
+      const data = await res.json();
+      if (data.success && data.token) {
+        onLogin(data.token);
+      } else {
+        setError(data.message || 'Login failed');
+      }
+    } catch {
+      setError('Network error');
+    }
   };
+
   return (
-    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${map[status] || "bg-gray-100 text-gray-800"}`}>
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
+    <form onSubmit={handleSubmit} style={{ maxWidth: 400, margin: '40px auto', padding: 24, border: '1px solid #ccc', borderRadius: 8, background: '#fff' }}>
+      <h2>Ground Owner Login</h2>
+      <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" required style={{ width: '100%', marginBottom: 12, padding: 8 }} />
+      <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" required style={{ width: '100%', marginBottom: 12, padding: 8 }} />
+      <button type="submit" style={{ width: '100%', padding: 8 }}>Login</button>
+      {error && <div style={{ color: 'red', marginTop: 8 }}>{error}</div>}
+    </form>
   );
 }
 
-function BookingDetailsModal({ booking, onClose }) {
-  if (!booking) return null;
+function stringToColor(str) {
+  // Simple hash to color
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const color = `hsl(${hash % 360}, 60%, 60%)`;
+  return color;
+}
+
+function UserAvatar({ name }) {
+  if (!name) return null;
+  const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md mx-2 p-6 relative animate-fade-in">
-        <button
-          className="absolute top-3 right-3 text-gray-400 hover:text-red-500 text-2xl"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          &times;
-        </button>
-        <h2 className="text-xl font-bold mb-4 text-green-800">Booking Details</h2>
-        <div className="space-y-2">
-          <div><b>Booking ID:</b> {booking.bookingId}</div>
-          <div><b>Status:</b> <StatusBadge status={booking.status} /></div>
-          <div><b>Date:</b> {new Date(booking.bookingDate).toLocaleDateString()}</div>
-          <div><b>Time:</b> {booking.timeSlot.startTime} - {booking.timeSlot.endTime}</div>
-          <div><b>Ground:</b> {booking.groundId?.name} <span className="text-gray-500 text-xs">{booking.groundId?.location?.address}</span></div>
-          <div className="flex items-center gap-2"><b>User:</b> <Avatar name={booking.userId?.name} /> {booking.userId?.name}</div>
-          <div className="flex items-center gap-2"><MdOutlineEmail /> {booking.userId?.email}</div>
-          <div className="flex items-center gap-2"><BsTelephone /> {booking.playerDetails?.contactPerson?.phone || "-"}</div>
-          <div><b>Advance Paid:</b> <span className="text-green-700 font-bold">₹{booking.pricing?.totalAmount || "-"}</span></div>
+    <span style={{
+      display: 'inline-block',
+      width: 32,
+      height: 32,
+      borderRadius: '50%',
+      background: stringToColor(name),
+      color: '#fff',
+      fontWeight: 700,
+      fontSize: 16,
+      textAlign: 'center',
+      lineHeight: '32px',
+      marginRight: 8
+    }}>{initials}</span>
+  );
+}
+
+// Helper: convert 24h time to 12h format for display
+function formatTime12h(time24h) {
+  const [hours, minutes] = time24h.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  return `${hour12}:${minutes} ${ampm}`;
+}
+
+// Helper: format time range for display
+function formatTimeRange(startTime, endTime) {
+  return `${formatTime12h(startTime)} - ${formatTime12h(endTime)}`;
+}
+
+function downloadCSV(data, filename) {
+  const csvRows = [];
+  const headers = ['Booking ID', 'User', 'Phone', 'Ground', 'Date', 'Time', 'Advance Paid', 'Status'];
+  csvRows.push(headers.join(','));
+  data.forEach(b => {
+    csvRows.push([
+      b.bookingId,
+      b.userId?.name || '',
+      b.playerDetails?.contactPerson?.phone || '',
+      b.groundId?.name || '',
+      new Date(b.bookingDate).toLocaleDateString(),
+      formatTimeRange(b.timeSlot.startTime, b.timeSlot.endTime),
+      b.pricing?.totalAmount || '',
+      b.status
+    ].map(x => `"${x}"`).join(','));
+  });
+  const csv = csvRows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.setAttribute('hidden', '');
+  a.setAttribute('href', url);
+  a.setAttribute('download', filename);
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function getBookingsPerMonth(bookings) {
+  const months = {};
+  bookings.forEach(b => {
+    const d = new Date(b.bookingDate);
+    const key = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+    months[key] = (months[key] || 0) + 1;
+  });
+  return months;
+}
+
+// Custom confirmation dialog component
+function ConfirmDialog({ open, message, onConfirm, onCancel }) {
+  if (!open) return null;
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#0007', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 32, minWidth: 320, boxShadow: '0 4px 32px #0003', textAlign: 'center' }}>
+        <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 24 }}>{message}</div>
+        <div style={{ display: 'flex', gap: 18, justifyContent: 'center' }}>
+          <button onClick={onConfirm} style={{ padding: '10px 28px', background: '#43a047', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #43a04722', transition: 'background 0.2s' }}>Confirm</button>
+          <button onClick={onCancel} style={{ padding: '10px 28px', background: '#e0e0e0', color: '#333', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #bdbdbd22', transition: 'background 0.2s' }}>Cancel</button>
         </div>
       </div>
     </div>
   );
 }
 
-export default function App() {
-  // Simulated state for demonstration
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedNav, setSelectedNav] = useState("dashboard");
-  const [showModal, setShowModal] = useState(false);
+function BookingDetailsModal({ booking, onClose, onStatusChange }) {
+  const [confirm, setConfirm] = useState({ open: false, action: '', label: '' });
+  if (!booking) return null;
+  // Show custom confirmation dialog
+  const handleAction = (action, label) => {
+    setConfirm({ open: true, action, label });
+  };
+  const handleConfirm = () => {
+    setConfirm({ open: false, action: '', label: '' });
+    onStatusChange(confirm.action);
+  };
+  const handleCancel = () => {
+    setConfirm({ open: false, action: '', label: '' });
+  };
+  return (
+    <>
+      <ConfirmDialog
+        open={confirm.open}
+        message={`Are you sure you want to ${confirm.label} this booking?`}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#0008', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ background: '#fff', borderRadius: 16, padding: 32, minWidth: 400, maxWidth: 600, boxShadow: '0 4px 32px #0003', position: 'relative' }}>
+          <button onClick={onClose} style={{ position: 'absolute', top: 18, right: 18, background: 'none', border: 'none', fontSize: 22, color: '#888', cursor: 'pointer' }}>&times;</button>
+          <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12 }}>Booking Details</h2>
+          <div style={{ marginBottom: 16 }}>
+            <b>Booking ID:</b> {booking.bookingId}<br />
+            <b>Status:</b> {booking.status}<br />
+            <b>Date:</b> {new Date(booking.bookingDate).toLocaleDateString()}<br />
+            <b>Time:</b> {formatTimeRange(booking.timeSlot.startTime, booking.timeSlot.endTime)}<br />
+            <b>Ground:</b> {booking.groundId?.name} <br /> <span style={{ color: '#888' }}>{booking.groundId?.location?.address}</span><br />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <b>User:</b> {booking.userId?.name} <br /> <b>Email:</b> {booking.userId?.email}<br />
+            <b>Phone:</b> {booking.playerDetails?.contactPerson?.phone || '-'}
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <b>Team Name:</b> {booking.playerDetails?.teamName || '-'}<br />
+            <b>Players:</b> {booking.playerDetails?.playerCount || '-'}<br />
+            <b>Requirements:</b> {booking.playerDetails?.requirements || '-'}
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <b>Advance Paid:</b> ₹{booking.pricing?.totalAmount || '-'}
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 18, justifyContent: 'center' }}>
+            {booking.status === 'pending' && (
+              <button
+                onClick={() => handleAction('confirmed', 'approve')}
+                style={{ padding: '10px 22px', background: '#43a047', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #43a04722', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.2s' }}
+                onMouseOver={e => e.currentTarget.style.background = '#388e3c'}
+                onMouseOut={e => e.currentTarget.style.background = '#43a047'}
+              >
+                ✔️ Approve
+              </button>
+            )}
+            {booking.status !== 'completed' && (
+              <button
+                onClick={() => handleAction('completed', 'mark as completed')}
+                style={{ padding: '10px 22px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #1976d222', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.2s' }}
+                onMouseOver={e => e.currentTarget.style.background = '#1565c0'}
+                onMouseOut={e => e.currentTarget.style.background = '#1976d2'}
+              >
+                ✅ Mark Completed
+              </button>
+            )}
+            {booking.status !== 'cancelled' && (
+              <button
+                onClick={() => handleAction('cancelled', 'cancel')}
+                style={{ padding: '10px 22px', background: '#e53935', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #e5393522', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.2s' }}
+                onMouseOver={e => e.currentTarget.style.background = '#b71c1c'}
+                onMouseOut={e => e.currentTarget.style.background = '#e53935'}
+              >
+                ❌ Cancel
+              </button>
+            )}
+            <button
+              onClick={() => window.print()}
+              style={{ padding: '10px 22px', background: '#fff', color: '#388e3c', border: '2px solid #388e3c', borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #388e3c22', display: 'flex', alignItems: 'center', gap: 8, transition: 'background 0.2s' }}
+              onMouseOver={e => e.currentTarget.style.background = '#e8f5e9'}
+              onMouseOut={e => e.currentTarget.style.background = '#fff'}
+            >
+              ⬇️ Download Invoice
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Dashboard({ token, onLogout }) {
+  const [owner, setOwner] = useState(null);
+  const [grounds, setGrounds] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [error, setError] = useState('');
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
+  const [userFilter, setUserFilter] = useState('');
+  const [search, setSearch] = useState('');
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const paginatedBookings = bookings.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.ceil(bookings.length / pageSize);
+  const [Toasts, showToast] = useToast();
+  const [showProfile, setShowProfile] = useState(false);
+  const [profile, setProfile] = useState({ name: '', email: '', phone: '', notifications: true });
+  const [showAddBooking, setShowAddBooking] = useState(false);
+  const [addBookingData, setAddBookingData] = useState({
+    groundId: '',
+    date: '',
+    startTime: '',
+    endTime: '',
+    teamName: '',
+    playerCount: '',
+    contactName: '',
+    contactPhone: '',
+    contactEmail: '',
+    requirements: '',
+  });
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [addBookingError, setAddBookingError] = useState('');
+  const [isCreatingBooking, setIsCreatingBooking] = useState(false);
+  
+  // Notification state
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [lastBookingCount, setLastBookingCount] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(true);
 
-  // Simulated data
-  const owner = { name: "T.K. Gaming", email: "oneloki05@gmail.com" };
-  const bookings = [
-    {
-      _id: "1",
-      bookingId: "BCMDE3LO9VQKH5L",
-      userId: { name: "T.K. Gaming", email: "oneloki05@gmail.com" },
-      playerDetails: { contactPerson: { phone: "9328978130" } },
-      groundId: { name: "tafs", location: { address: "Parshv mombasa, Mumbai" } },
-      bookingDate: "2025-07-22T14:00:00Z",
-      timeSlot: { startTime: "14:00", endTime: "15:00" },
-      pricing: { totalAmount: 506 },
-      status: "confirmed",
-    },
-    // ... more bookings
-  ];
+  // Audio notification function
+  const playNotificationSound = () => {
+    if (!audioEnabled) return;
+    
+    try {
+      // Create a simple notification sound using Web Audio API
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.2);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } catch (error) {
+      console.log('Audio notification failed:', error);
+    }
+  };
 
-  // Responsive sidebar
-  const sidebarClasses = sidebarOpen
-    ? "fixed inset-0 z-40 bg-black/40 flex md:static md:bg-transparent"
-    : "hidden md:flex";
+  // Browser notification function
+  const showBrowserNotification = (title, message) => {
+    if (!("Notification" in window)) {
+      console.log("This browser does not support desktop notification");
+      return;
+    }
+
+    if (Notification.permission === "granted") {
+      new Notification(title, {
+        body: message,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        tag: 'booking-notification'
+      });
+    } else if (Notification.permission !== "denied") {
+      Notification.requestPermission().then(permission => {
+        if (permission === "granted") {
+          new Notification(title, {
+            body: message,
+            icon: '/favicon.ico',
+            badge: '/favicon.ico',
+            tag: 'booking-notification'
+          });
+        }
+      });
+    }
+  };
+
+  // Validation helpers
+  function isValidEmail(email) {
+    return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
+  function isValidPhone(phone) {
+    return /^\d{8,15}$/.test(phone.replace(/\D/g, ''));
+  }
+  function isPositiveInt(val) {
+    return /^\d+$/.test(val) && parseInt(val) > 0;
+  }
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const meRes = await fetch('http://localhost:3001/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+        const me = await meRes.json();
+        if (!me.success || me.user.role !== 'ground_owner') throw new Error('Not a ground owner');
+        setOwner(me.user);
+        const groundsRes = await fetch('http://localhost:3001/api/grounds/owner', { headers: { Authorization: `Bearer ${token}` } });
+        const groundsData = await groundsRes.json();
+        setGrounds(groundsData.grounds || []);
+        const bookingsRes = await fetch('http://localhost:3001/api/bookings/owner', { headers: { Authorization: `Bearer ${token}` } });
+        const bookingsData = await bookingsRes.json();
+        setBookings(bookingsData.bookings || []);
+        setLastBookingCount(bookingsData.bookings?.length || 0);
+        
+        // Request notification permission
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      } catch (err) {
+        setError('Failed to load dashboard: ' + err.message);
+      }
+    }
+    fetchData();
+  }, [token]);
+
+  useEffect(() => {
+    if (owner) {
+      setProfile({
+        name: owner.name || '',
+        email: owner.email || '',
+        phone: owner.phone || '',
+        notifications: true,
+      });
+    }
+  }, [owner]);
+
+  // Check for new bookings and notifications
+  useEffect(() => {
+    if (!owner) return;
+    
+    const checkForNewBookings = async () => {
+      try {
+        const bookingsRes = await fetch('http://localhost:3001/api/bookings/owner', { 
+          headers: { Authorization: `Bearer ${token}` } 
+        });
+        const bookingsData = await bookingsRes.json();
+        const currentBookings = bookingsData.bookings || [];
+        
+        // Check if there are new bookings
+        if (currentBookings.length > lastBookingCount && lastBookingCount > 0) {
+          const newBookings = currentBookings.slice(0, currentBookings.length - lastBookingCount);
+          newBookings.forEach(booking => {
+            const ground = grounds.find(g => g._id === booking.groundId);
+            const notification = {
+              id: Date.now() + Math.random(),
+              type: 'new_booking',
+              title: 'New Booking Received!',
+              message: `New booking for ${ground?.name || 'your ground'} on ${new Date(booking.bookingDate).toLocaleDateString()} at ${formatTimeRange(booking.timeSlot.startTime, booking.timeSlot.endTime)}`,
+              booking: booking,
+              timestamp: new Date(),
+              read: false
+            };
+            setNotifications(prev => [notification, ...prev.slice(0, 9)]); // Keep only 10 notifications
+            setUnreadCount(prev => prev + 1);
+            showToast(`New booking received for ${ground?.name || 'your ground'}!`, 'info');
+            playNotificationSound(); // Play sound for new bookings
+            showBrowserNotification('New Booking Received!', `New booking for ${ground?.name || 'your ground'} on ${new Date(booking.bookingDate).toLocaleDateString()} at ${formatTimeRange(booking.timeSlot.startTime, booking.timeSlot.endTime)}`);
+          });
+        }
+        
+        setBookings(currentBookings);
+        setLastBookingCount(currentBookings.length);
+      } catch (error) {
+        console.error('Error checking for new bookings:', error);
+      }
+    };
+    
+    // Check immediately
+    checkForNewBookings();
+    
+    // Set up polling every 10 seconds
+    const interval = setInterval(checkForNewBookings, 10000);
+    
+    return () => clearInterval(interval);
+  }, [owner, token, grounds, lastBookingCount]);
+
+  // Update browser tab title with notification badge
+  useEffect(() => {
+    const originalTitle = 'Ground Owner Dashboard';
+    if (unreadCount > 0) {
+      document.title = `(${unreadCount}) ${originalTitle}`;
+    } else {
+      document.title = originalTitle;
+    }
+  }, [unreadCount]);
+
+  // Handle click outside notification panel
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showNotifications) {
+        const notificationPanel = document.querySelector('[data-notification-panel]');
+        const notificationButton = document.querySelector('[data-notification-button]');
+        
+        if (notificationPanel && 
+            !notificationPanel.contains(event.target) && 
+            notificationButton && 
+            !notificationButton.contains(event.target)) {
+          setShowNotifications(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showNotifications]);
+
+  const handleApprove = async (id) => {
+    try {
+      const res = await fetch(`http://localhost:3001/api/bookings/${id}/approve`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBookings(bookings => bookings.map(b => b._id === id ? { ...b, status: 'confirmed' } : b));
+        showToast('Booking approved.', 'info');
+        showBrowserNotification('Booking Approved!', 'Your booking has been approved.');
+      } else {
+        showToast(data.message || 'Failed to approve', 'error');
+      }
+    } catch {
+      showToast('Failed to approve', 'error');
+    }
+  };
+
+  const handleStatusChange = async (status, bookingOverride) => {
+    const booking = bookingOverride || selectedBooking;
+    if (!booking) return;
+    try {
+      const res = await fetch(`http://localhost:3001/api/bookings/${booking._id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBookings(bookings => bookings.map(b => b._id === booking._id ? { ...b, status } : b));
+        setSelectedBooking(null);
+        showToast(`Booking marked as ${status}.`, 'info');
+        showBrowserNotification(`Booking Status Updated!`, `Your booking status has been updated to ${status.charAt(0).toUpperCase() + status.slice(1)}.`);
+      } else {
+        showToast(data.message || 'Failed to update status', 'error');
+      }
+    } catch {
+      showToast('Failed to update status', 'error');
+    }
+  };
+
+  function handleSendReminder(booking) {
+    showToast(`Reminder sent to ${booking.playerDetails?.contactPerson?.phone || 'user'}.`, 'info');
+    showBrowserNotification('Reminder Sent!', `Reminder sent to ${booking.playerDetails?.contactPerson?.phone || 'user'}.`);
+  }
+
+  async function handleProfileSave(e) {
+    e.preventDefault();
+    // Simulate API call
+    setTimeout(() => {
+      showToast('Profile updated!', 'info');
+      setShowProfile(false);
+    }, 800);
+  }
+
+  // Filtering logic (add search)
+  const filteredBookings = bookings.filter(b => {
+    let match = true;
+    if (statusFilter && b.status !== statusFilter) match = false;
+    if (dateFilter) {
+      const bookingDate = new Date(b.bookingDate).toISOString().slice(0, 10);
+      if (bookingDate !== dateFilter) match = false;
+    }
+    if (userFilter && b.userId && b.userId.name) {
+      if (!b.userId.name.toLowerCase().includes(userFilter.toLowerCase())) match = false;
+    }
+    if (search) {
+      const s = search.toLowerCase();
+      if (!(
+        (b.userId?.name && b.userId.name.toLowerCase().includes(s)) ||
+        (b.playerDetails?.contactPerson?.phone && b.playerDetails.contactPerson.phone.includes(s)) ||
+        (b.bookingId && b.bookingId.toLowerCase().includes(s))
+      )) match = false;
+    }
+    return match;
+  });
+
+  // Analytics
+  const totalBookings = bookings.length;
+  const totalRevenue = bookings.reduce((sum, b) => sum + (b.pricing?.totalAmount || 0), 0);
+  const pendingCount = bookings.filter(b => b.status === 'pending').length;
+  const bookingsPerMonth = getBookingsPerMonth(bookings);
+  const monthsSorted = Object.keys(bookingsPerMonth).sort();
+
+  // Fetch available slots when ground or date changes
+  useEffect(() => {
+    async function fetchSlots() {
+      setAvailableSlots([]);
+      setAddBookingData(d => ({ ...d, startTime: '', endTime: '' }));
+      if (!addBookingData.groundId || !addBookingData.date) return;
+      setIsLoadingSlots(true);
+      try {
+        const dateStr = addBookingData.date;
+        const res = await fetch(`http://localhost:3001/api/bookings/ground/${addBookingData.groundId}/${dateStr}`);
+        const data = await res.json();
+        if (data.success && data.availability) {
+          setAvailableSlots(data.availability.availableSlots);
+        } else {
+          setAvailableSlots([]);
+        }
+      } catch {
+        setAvailableSlots([]);
+      } finally {
+        setIsLoadingSlots(false);
+      }
+    }
+    fetchSlots();
+    // eslint-disable-next-line
+  }, [addBookingData.groundId, addBookingData.date]);
+
+  // Helper: get all 24h times
+  function getAll24hTimes() {
+    return Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+  }
+
+  // Helper: get display label for time (12h format)
+  function getTimeDisplayLabel(time24h) {
+    return formatTime12h(time24h);
+  }
+  // Helper: get booked slot ranges
+  function getBookedRanges() {
+    // availableSlots contains only available slots, so booked slots are the complement
+    const allSlots = Array.from({ length: 24 }, (_, i) => {
+      const start = `${i.toString().padStart(2, '0')}:00`;
+      const end = `${((i + 1) % 24).toString().padStart(2, '0')}:00`;
+      return `${start}-${end}`;
+    });
+    const availableSet = new Set(availableSlots);
+    return allSlots.filter(slot => !availableSet.has(slot));
+  }
+  // Helper: get IST date string (yyyy-MM-dd)
+  function getISTDateString(date = new Date()) {
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+    const ist = new Date(utc + istOffset);
+    return ist.toISOString().slice(0, 10);
+  }
+  // Helper: get IST hour
+  function getISTHour(date = new Date()) {
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+    const ist = new Date(utc + istOffset);
+    return ist.getHours();
+  }
+  // Helper: get available start times (cannot start in a booked slot)
+  function getAvailableStartTimes() {
+    const booked = getBookedRanges().map(slot => slot.split('-')[0]);
+    let times = getAll24hTimes().filter(time => !booked.includes(time));
+    // Hide past times for today (IST)
+    if (addBookingData.date && addBookingData.date === getISTDateString()) {
+      const currentHour = getISTHour();
+      times = times.filter(time => parseInt(time.split(':')[0], 10) > currentHour);
+    }
+    return times;
+  }
+  // Helper: get available end times for a given start time (must not overlap with any booked slot)
+  function getAvailableEndTimes(startTime) {
+    if (!startTime) return [];
+    const startIdx = getAll24hTimes().indexOf(startTime);
+    if (startIdx === -1) return [];
+    const endTimes = [];
+    
+    // Get all booked time ranges
+    const bookedRanges = getBookedRanges().map(slot => {
+      const [start, end] = slot.split('-');
+      return {
+        start: new Date(`2000-01-01 ${start}`),
+        end: new Date(`2000-01-01 ${end}`)
+      };
+    });
+    
+    const startTimeDate = new Date(`2000-01-01 ${startTime}`);
+    
+    for (let i = startIdx + 1; i <= 24; i++) {
+      if (i === 24) break;
+      const endTime = getAll24hTimes()[i % 24];
+      const endTimeDate = new Date(`2000-01-01 ${endTime}`);
+      
+      // Check if this time range overlaps with any booked range
+      let hasOverlap = false;
+      for (const bookedRange of bookedRanges) {
+        if (startTimeDate < bookedRange.end && endTimeDate > bookedRange.start) {
+          hasOverlap = true;
+          break;
+        }
+      }
+      
+      if (hasOverlap) break;
+      endTimes.push(endTime);
+    }
+    
+    return endTimes;
+  }
+  // Helper: show duration
+  function getDuration(start, end) {
+    if (!start || !end) return '';
+    const st = parseInt(start.split(':')[0], 10);
+    const et = parseInt(end.split(':')[0], 10);
+    let dur = et - st;
+    if (dur <= 0) dur += 24;
+    return dur;
+  }
+
+  // Helper: get slot label
+  function getSlotLabel(start, end) {
+    return `${start} - ${end}`;
+  }
+
+  // Helper to refresh slots
+  async function refreshAvailableSlots(groundId, date) {
+    if (!groundId || !date) return;
+    setIsLoadingSlots(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/bookings/ground/${groundId}/${date}`);
+      const data = await res.json();
+      if (data.success && data.availability) {
+        setAvailableSlots(data.availability.availableSlots);
+      } else {
+        setAvailableSlots([]);
+      }
+    } catch {
+      setAvailableSlots([]);
+    } finally {
+      setIsLoadingSlots(false);
+    }
+  }
+
+  // Booking form submit handler
+  async function handleAddBookingSubmit(e) {
+    e.preventDefault();
+    setAddBookingError('');
+    // Validation
+    if (!addBookingData.groundId || !addBookingData.date || !addBookingData.startTime || !addBookingData.endTime || !addBookingData.playerCount || !addBookingData.contactName || !addBookingData.contactPhone) {
+      setAddBookingError('Please fill all required fields.');
+      return;
+    }
+    if (!isPositiveInt(addBookingData.playerCount)) {
+      setAddBookingError('Number of players must be a positive integer.');
+      return;
+    }
+    if (!isValidPhone(addBookingData.contactPhone)) {
+      setAddBookingError('Please enter a valid phone number (8-15 digits).');
+      return;
+    }
+    if (!isValidEmail(addBookingData.contactEmail)) {
+      setAddBookingError('Please enter a valid email address.');
+      return;
+    }
+    // End time must be after start time
+    const st = addBookingData.startTime.split(':').map(Number);
+    const et = addBookingData.endTime.split(':').map(Number);
+    if (et[0] < st[0] || (et[0] === st[0] && et[1] <= st[1])) {
+      setAddBookingError('End time must be after start time.');
+      return;
+    }
+    setIsCreatingBooking(true);
+    try {
+      const payload = {
+        groundId: addBookingData.groundId,
+        bookingDate: addBookingData.date,
+        timeSlot: `${addBookingData.startTime}-${addBookingData.endTime}`,
+        playerDetails: {
+          teamName: addBookingData.teamName || undefined,
+          playerCount: parseInt(addBookingData.playerCount),
+          contactPerson: {
+            name: addBookingData.contactName,
+            phone: addBookingData.contactPhone,
+            email: addBookingData.contactEmail || undefined,
+          },
+        },
+        requirements: addBookingData.requirements || undefined,
+      };
+      const res = await fetch('http://localhost:3001/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setShowAddBooking(false);
+        setAddBookingData({ groundId: '', date: '', startTime: '', endTime: '', teamName: '', playerCount: '', contactName: '', contactPhone: '', contactEmail: '', requirements: '' });
+        setBookings(bks => [data.booking, ...bks]);
+        showToast('Booking created!', 'info');
+        showBrowserNotification('Booking Created!', 'Your new booking has been created.');
+        // Refresh slots for the same ground and date
+        await refreshAvailableSlots(payload.groundId, payload.bookingDate);
+      } else {
+        setAddBookingError(data.message || 'Failed to create booking.');
+        // Refresh slots in case of race condition
+        await refreshAvailableSlots(payload.groundId, payload.bookingDate);
+      }
+    } catch {
+      setAddBookingError('Failed to create booking.');
+    } finally {
+      setIsCreatingBooking(false);
+    }
+  }
+
+  if (error) return <div style={{ color: 'red', padding: 32 }}>{error}</div>;
+  if (!owner) return <div style={{ padding: 32 }}>Loading...</div>;
+
+  // Unique statuses and users for filter dropdowns
+  const uniqueStatuses = Array.from(new Set(bookings.map(b => b.status)));
+  const uniqueUsers = Array.from(new Set(bookings.map(b => b.userId?.name).filter(Boolean)));
 
   return (
-    <div className="owner-panel-root min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <aside className={`${sidebarClasses} w-64 flex-shrink-0`}>
-        <nav className="bg-white h-full w-64 shadow-lg flex flex-col py-8 px-4">
-          <div className="mb-8 flex items-center gap-2">
-            <span className="text-2xl font-bold text-green-700">🏏 BoxCric</span>
+    <div style={{ maxWidth: 1200, margin: '40px auto', padding: 0, background: '#f7fafc', borderRadius: 18, boxShadow: '0 4px 32px #0002', fontFamily: 'Segoe UI, Arial, sans-serif' }}>
+      <Toasts />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '32px 40px 0 40px' }}>
+        <h2 style={{ fontSize: 32, fontWeight: 800, color: '#1b5e20', letterSpacing: 1 }}>Welcome, {owner.name} <span style={{ fontWeight: 400, color: '#333', fontSize: 20 }}>(Ground Owner)</span></h2>
+        <div style={{ display: 'flex', gap: 16 }}>
+          <button 
+            onClick={() => setShowNotifications(!showNotifications)} 
+            data-notification-button
+            style={{ 
+              padding: '10px 24px', 
+              borderRadius: 8, 
+              border: 'none', 
+              background: unreadCount > 0 ? '#ff9800' : '#757575', 
+              color: '#fff', 
+              fontWeight: 700, 
+              fontSize: 16, 
+              cursor: 'pointer', 
+              boxShadow: '0 2px 8px #0002',
+              position: 'relative'
+            }}
+          >
+            🔔 Notifications
+            {unreadCount > 0 && (
+              <span style={{
+                position: 'absolute',
+                top: -8,
+                right: -8,
+                background: '#e53935',
+                color: '#fff',
+                borderRadius: '50%',
+                width: 20,
+                height: 20,
+                fontSize: 12,
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+          <button onClick={() => setShowAddBooking(true)} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#43a047', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #43a04722' }}>+ Add Booking</button>
+          <button onClick={() => setShowProfile(p => !p)} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#1976d2', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #1976d222' }}>Profile & Settings</button>
+          <button onClick={onLogout} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#e53935', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #e5393522' }}>Logout</button>
+        </div>
+      </div>
+      
+      {/* Notification Panel */}
+      {showNotifications && (
+        <div style={{ 
+          position: 'fixed', 
+          top: 100, 
+          right: 40, 
+          width: 400, 
+          maxHeight: 500, 
+          background: '#fff', 
+          borderRadius: 12, 
+          boxShadow: '0 4px 20px #0003', 
+          zIndex: 2000, 
+          border: '1px solid #e0e0e0',
+          overflow: 'hidden'
+        }} data-notification-panel>
+          <div style={{ 
+            padding: '16px 20px', 
+            borderBottom: '1px solid #e0e0e0', 
+            background: '#f5f5f5',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#333' }}>
+              🔔 Notifications ({notifications.length})
+            </h3>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <button 
+                onClick={() => setAudioEnabled(!audioEnabled)}
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: audioEnabled ? '#1976d2' : '#999', 
+                  cursor: 'pointer', 
+                  fontSize: 16,
+                  padding: 4
+                }}
+                title={audioEnabled ? 'Disable sound notifications' : 'Enable sound notifications'}
+              >
+                {audioEnabled ? '🔊' : '🔇'}
+              </button>
+              <button 
+                onClick={() => {
+                  setNotifications([]);
+                  setUnreadCount(0);
+                }}
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: '#666', 
+                  cursor: 'pointer', 
+                  fontSize: 14,
+                  textDecoration: 'underline'
+                }}
+              >
+                Clear All
+              </button>
+            </div>
           </div>
-          <ul className="flex-1 space-y-2">
-            {SIDEBAR_LINKS.map(link => (
-              <li key={link.key}>
-                <button
-                  className={`flex items-center gap-3 w-full px-4 py-2 rounded-lg text-lg font-medium transition ${
-                    selectedNav === link.key
-                      ? "bg-green-100 text-green-800"
-                      : "hover:bg-green-50 text-gray-700"
-                  }`}
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            {notifications.length === 0 ? (
+              <div style={{ padding: '40px 20px', textAlign: 'center', color: '#666' }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>🔕</div>
+                <div>No notifications yet</div>
+                <div style={{ fontSize: 14, marginTop: 8 }}>You'll see new booking notifications here</div>
+              </div>
+            ) : (
+              notifications.map((notification, index) => (
+                <div 
+                  key={notification.id}
+                  style={{ 
+                    padding: '16px 20px', 
+                    borderBottom: index < notifications.length - 1 ? '1px solid #f0f0f0' : 'none',
+                    background: notification.read ? '#fff' : '#f8f9fa',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s'
+                  }}
                   onClick={() => {
-                    setSelectedNav(link.key);
-                    setSidebarOpen(false);
+                    setNotifications(prev => 
+                      prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
+                    );
+                    setUnreadCount(prev => Math.max(0, prev - 1));
+                    if (notification.booking) {
+                      setSelectedBooking(notification.booking);
+                    }
                   }}
                 >
-                  {link.icon}
-                  {link.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <button
-            className="mt-8 flex items-center gap-2 px-4 py-2 rounded-lg bg-red-100 text-red-700 font-semibold hover:bg-red-200 transition"
-            onClick={() => toast.success("Logged out!")}
-          >
-            <FiLogOut /> Logout
-          </button>
-        </nav>
-        {/* Overlay for mobile */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-30 bg-black/40 md:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-      </aside>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen">
-        {/* Top Bar */}
-        <header className="flex items-center justify-between bg-white shadow px-6 py-4 sticky top-0 z-20">
-          <button
-            className="md:hidden text-2xl text-green-700"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open sidebar"
-          >
-            <FiMenu />
-          </button>
-          <h1 className="text-2xl font-bold text-green-800 tracking-wide">Ground Owner Panel</h1>
-          <div className="flex items-center gap-3">
-            <Avatar name={owner.name} />
-            <span className="font-semibold text-gray-700">{owner.name}</span>
-          </div>
-        </header>
-
-        {/* Analytics Cards */}
-        <section className="owner-panel-section grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-          <div className="bg-white rounded-lg shadow p-6 flex flex-col items-center">
-            <span className="text-3xl text-green-700 font-bold">{bookings.length}</span>
-            <span className="text-gray-500 mt-2">Total Bookings</span>
-          </div>
-          <div className="bg-white rounded-lg shadow p-6 flex flex-col items-center">
-            <span className="text-3xl text-green-700 font-bold">
-              ₹{bookings.reduce((sum, b) => sum + (b.pricing?.totalAmount || 0), 0)}
-            </span>
-            <span className="text-gray-500 mt-2">Total Revenue</span>
-          </div>
-          <div className="bg-white rounded-lg shadow p-6 flex flex-col items-center">
-            <span className="text-3xl text-yellow-600 font-bold">
-              {bookings.filter(b => b.status === "pending").length}
-            </span>
-            <span className="text-gray-500 mt-2">Pending Bookings</span>
-          </div>
-        </section>
-
-        {/* Bookings Table */}
-        <section className="owner-panel-section mt-8">
-          <h2 className="owner-panel-section-title">All Bookings for Your Grounds</h2>
-          <div className="overflow-x-auto mt-4 rounded-lg shadow">
-            <table className="min-w-full bg-white divide-y divide-gray-200">
-              <thead>
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Booking ID</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">User</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Phone</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Ground</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Time</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Advance Paid</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bookings.map(b => (
-                  <tr
-                    key={b._id}
-                    className="hover:bg-green-50 transition cursor-pointer"
-                    onClick={() => {
-                      setSelectedBooking(b);
-                      setShowModal(true);
-                    }}
-                  >
-                    <td className="px-4 py-2">{b.bookingId}</td>
-                    <td className="px-4 py-2 flex items-center gap-2">
-                      <Avatar name={b.userId?.name} />
-                      <span>
-                        {b.userId?.name}
-                        <div className="text-xs text-gray-500">{b.userId?.email}</div>
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'flex-start',
+                    marginBottom: 8
+                  }}>
+                    <div style={{ 
+                      fontWeight: notification.read ? 400 : 600, 
+                      fontSize: 16, 
+                      color: '#333',
+                      marginBottom: 4
+                    }}>
+                      {notification.title}
+                    </div>
+                    {!notification.read && (
+                      <div style={{ 
+                        width: 8, 
+                        height: 8, 
+                        borderRadius: '50%', 
+                        background: '#1976d2',
+                        flexShrink: 0,
+                        marginTop: 4
+                      }} />
+                    )}
+                  </div>
+                  <div style={{ 
+                    fontSize: 14, 
+                    color: '#666', 
+                    lineHeight: 1.4,
+                    marginBottom: 8
+                  }}>
+                    {notification.message}
+                  </div>
+                  <div style={{ 
+                    fontSize: 12, 
+                    color: '#999',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <span>{notification.timestamp.toLocaleTimeString()}</span>
+                    {notification.type === 'new_booking' && (
+                      <span style={{ 
+                        background: '#e3f2fd', 
+                        color: '#1976d2', 
+                        padding: '2px 8px', 
+                        borderRadius: 12, 
+                        fontSize: 11,
+                        fontWeight: 500
+                      }}>
+                        New Booking
                       </span>
-                    </td>
-                    <td className="px-4 py-2">{b.playerDetails?.contactPerson?.phone || "-"}</td>
-                    <td className="px-4 py-2">{b.groundId?.name}<div className="text-xs text-gray-500">{b.groundId?.location?.address}</div></td>
-                    <td className="px-4 py-2">{new Date(b.bookingDate).toLocaleDateString()}</td>
-                    <td className="px-4 py-2">{b.timeSlot.startTime} - {b.timeSlot.endTime}</td>
-                    <td className="px-4 py-2 text-green-700 font-bold">₹{b.pricing?.totalAmount || "-"}</td>
-                    <td className="px-4 py-2"><StatusBadge status={b.status} /></td>
-                    <td className="px-4 py-2 flex gap-2">
-                      {b.status === "pending" && (
-                        <button className="bg-green-600 hover:bg-green-700 text-white rounded-md px-3 py-1 text-xs font-semibold flex items-center gap-1">
-                          <FaCheckCircle /> Approve
-                        </button>
-                      )}
-                      {b.status !== "completed" && (
-                        <button className="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-1 text-xs font-semibold flex items-center gap-1">
-                          <FaClock /> Mark Completed
-                        </button>
-                      )}
-                      {b.status !== "cancelled" && (
-                        <button className="bg-red-600 hover:bg-red-700 text-white rounded-md px-3 py-1 text-xs font-semibold flex items-center gap-1">
-                          <FaTimesCircle /> Cancel
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-          {bookings.length === 0 && (
-            <div className="owner-panel-empty-state">
-              <img src="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f3af.svg" alt="No bookings" />
-              <div className="title">No bookings found.</div>
-              <div className="desc">Try adjusting your filters or check back later.</div>
-            </div>
-          )}
-        </section>
-        <Toaster position="top-right" />
-        {showModal && (
-          <BookingDetailsModal
-            booking={selectedBooking}
-            onClose={() => setShowModal(false)}
-          />
-        )}
+        </div>
+      )}
+      
+      {showAddBooking && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#0008', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 0, minWidth: 340, maxWidth: 480, width: '95vw', maxHeight: '90vh', boxShadow: '0 4px 32px #0003', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+            <button onClick={() => setShowAddBooking(false)} style={{ position: 'absolute', top: 18, right: 18, background: 'none', border: 'none', fontSize: 22, color: '#888', cursor: 'pointer', zIndex: 2 }}>&times;</button>
+            <h2 style={{ fontSize: 24, fontWeight: 700, margin: '32px 0 18px 0', textAlign: 'center' }}>Add New Booking</h2>
+            <form onSubmit={handleAddBookingSubmit} style={{ overflowY: 'auto', padding: '0 32px 32px 32px', flex: 1 }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Ground *</label><br />
+                <select value={addBookingData.groundId} onChange={e => setAddBookingData(d => ({ ...d, groundId: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} required>
+                  <option value="">Select Ground</option>
+                  {grounds.map(g => <option key={g._id} value={g._id}>{g.name}</option>)}
+                </select>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Date *</label><br />
+                <input type="date" value={addBookingData.date} min={format(new Date(), 'yyyy-MM-dd')} onChange={e => setAddBookingData(d => ({ ...d, date: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} required />
+              </div>
+              <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontWeight: 600 }}>Start Time *</label><br />
+                  <select value={addBookingData.startTime} onChange={e => setAddBookingData(d => ({ ...d, startTime: e.target.value, endTime: '' }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} required disabled={isLoadingSlots || !availableSlots.length}>
+                    <option value="">Select</option>
+                    {getAvailableStartTimes().map(time => (
+                      <option key={time} value={time}>{getTimeDisplayLabel(time)}</option>
+                    ))}
+                  </select>
+                  {(!isLoadingSlots && availableSlots.length === 0) && (
+                    <div style={{ color: '#e53935', fontSize: 14, marginTop: 4 }}>No available slots for this ground and date.</div>
+                  )}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontWeight: 600 }}>End Time *</label><br />
+                  <select value={addBookingData.endTime} onChange={e => setAddBookingData(d => ({ ...d, endTime: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} required disabled={!addBookingData.startTime}>
+                    <option value="">Select</option>
+                    {getAvailableEndTimes(addBookingData.startTime).map(time => (
+                      <option key={time} value={time}>{getTimeDisplayLabel(time)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {/* Show duration */}
+              {addBookingData.startTime && addBookingData.endTime && (
+                <div style={{ marginBottom: 12, color: '#388e3c', fontWeight: 600 }}>
+                  Duration: {getDuration(addBookingData.startTime, addBookingData.endTime)} hour(s) ({formatTimeRange(addBookingData.startTime, addBookingData.endTime)})
+                </div>
+              )}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Team Name</label><br />
+                <input type="text" value={addBookingData.teamName} onChange={e => setAddBookingData(d => ({ ...d, teamName: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Number of Players *</label><br />
+                <input type="number" min={1} value={addBookingData.playerCount} onChange={e => setAddBookingData(d => ({ ...d, playerCount: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} required />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Contact Name *</label><br />
+                <input type="text" value={addBookingData.contactName} onChange={e => setAddBookingData(d => ({ ...d, contactName: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} required />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Contact Phone *</label><br />
+                <input type="tel" value={addBookingData.contactPhone} onChange={e => setAddBookingData(d => ({ ...d, contactPhone: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} required />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Contact Email</label><br />
+                <input type="email" value={addBookingData.contactEmail} onChange={e => setAddBookingData(d => ({ ...d, contactEmail: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600 }}>Special Requirements</label><br />
+                <textarea value={addBookingData.requirements} onChange={e => setAddBookingData(d => ({ ...d, requirements: e.target.value }))} style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} rows={2} />
+              </div>
+              {/* Validation errors */}
+              {addBookingError && <div style={{ color: 'red', marginBottom: 12 }}>{addBookingError}</div>}
+              <button type="submit" disabled={isCreatingBooking} style={{ width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#43a047', color: '#fff', fontWeight: 700, fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 8px #43a04722', marginTop: 8 }}>{isCreatingBooking ? 'Creating...' : 'Create Booking'}</button>
+            </form>
+          </div>
+        </div>
+      )}
+      {showProfile && (
+        <form onSubmit={handleProfileSave} style={{ background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 32, margin: '32px 40px', maxWidth: 500 }}>
+          <h3 style={{ fontSize: 22, fontWeight: 700, color: '#388e3c', marginBottom: 18 }}>Profile & Settings</h3>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            Name:<br />
+            <input type="text" value={profile.name} onChange={e => setProfile(p => ({ ...p, name: e.target.value }))} style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} />
+          </label>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            Email:<br />
+            <input type="email" value={profile.email} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} />
+          </label>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            Phone:<br />
+            <input type="text" value={profile.phone} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #bdbdbd', fontSize: 16 }} />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', marginBottom: 18 }}>
+            <input type="checkbox" checked={profile.notifications} onChange={e => setProfile(p => ({ ...p, notifications: e.target.checked }))} style={{ marginRight: 8 }} />
+            Receive notifications for new bookings
+          </label>
+          <button type="submit" style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#388e3c', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #388e3c22' }}>Save</button>
+        </form>
+      )}
+      {/* Analytics Bar */}
+      <div style={{ display: 'flex', gap: 32, margin: '32px 40px 0 40px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 180, flex: 1 }}>
+          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Total Bookings</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#1b5e20' }}>{totalBookings}</div>
+        </div>
+        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 180, flex: 1 }}>
+          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Total Revenue</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#388e3c' }}>₹{totalRevenue}</div>
+        </div>
+        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 180, flex: 1, position: 'relative' }}>
+          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Pending Bookings</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#fbc02d' }}>{pendingCount}
+            {pendingCount > 0 && <span style={{ display: 'inline-block', background: '#fbc02d', color: '#fff', borderRadius: '50%', fontSize: 14, fontWeight: 700, padding: '2px 8px', marginLeft: 8 }}>!</span>}
+          </div>
+        </div>
+        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 220, flex: 2 }}>
+          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Bookings Per Month</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 60 }}>
+            {monthsSorted.map(month => (
+              <div key={month} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: 60 }}>
+                <div style={{ width: 18, height: bookingsPerMonth[month] * 8, background: '#43a047', borderRadius: 4, marginBottom: 2, transition: 'height 0.3s' }}></div>
+                <div style={{ fontSize: 12, color: '#888' }}>{month.slice(2)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
+      {/* Search and Export Bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, margin: '32px 40px 0 40px' }}>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search by user, phone, or booking ID..."
+          style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #bdbdbd', fontSize: 16, flex: 2 }}
+        />
+        <button
+          onClick={() => downloadCSV(filteredBookings, 'bookings.csv')}
+          style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#388e3c', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #388e3c22', display: 'flex', alignItems: 'center', gap: 8 }}
+        >
+          <span role="img" aria-label="download">⬇️</span> Export CSV
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 16, margin: '32px 40px 0 40px', alignItems: 'center' }}>
+        <button onClick={() => {}} style={{ padding: '8px 24px', borderRadius: 8, border: '2px solid #388e3c', background: '#e8f5e9', color: '#388e3c', fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>Table View</button>
+      </div>
+      <div style={{ padding: '0 40px 40px 40px' }}>
+        <h3 style={{ marginTop: 36, fontSize: 24, fontWeight: 700, color: '#388e3c', borderBottom: '2px solid #e0e0e0', paddingBottom: 8 }}>Your Grounds</h3>
+        {grounds.length === 0 ? <div style={{ margin: '32px 0' }}>No grounds found.</div> : (
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', margin: '24px 0 36px 0' }}>
+            {grounds.map(g => (
+              <div key={g._id} style={{ minWidth: 260, flex: 1, background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24, marginBottom: 8, border: '1px solid #e0e0e0' }}>
+                <b style={{ fontSize: 20, color: '#1b5e20' }}>{g.name}</b> <span style={{ color: '#888', fontWeight: 500 }}>({g.status})</span><br />
+                <span style={{ color: '#555', fontSize: 15 }}>{g.description}</span><br />
+                <span style={{ color: '#666', fontSize: 14 }}>{g.location.address}, {g.location.cityName}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <h3 style={{ fontSize: 24, fontWeight: 700, color: '#388e3c', borderBottom: '2px solid #e0e0e0', paddingBottom: 8, marginTop: 36 }}>All Bookings for Your Grounds</h3>
+        {/* Filter Controls */}
+        <div style={{ display: 'flex', gap: 18, margin: '24px 0 28px 0', alignItems: 'center', background: '#e8f5e9', borderRadius: 8, padding: 16, boxShadow: '0 1px 4px #0001' }}>
+          <span style={{ fontWeight: 600, color: '#388e3c', fontSize: 16 }}>Filter:</span>
+          <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500 }}>
+            <span style={{ marginRight: 6 }}>Status</span>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ marginLeft: 4, padding: 6, borderRadius: 4, border: '1px solid #bdbdbd' }}>
+              <option value="">All</option>
+              {uniqueStatuses.map(status => <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500 }}>
+            <span style={{ marginRight: 6 }}>Date</span>
+            <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={{ marginLeft: 4, padding: 6, borderRadius: 4, border: '1px solid #bdbdbd' }} />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500 }}>
+            <span style={{ marginRight: 6 }}>User</span>
+            <select value={userFilter} onChange={e => setUserFilter(e.target.value)} style={{ marginLeft: 4, padding: 6, borderRadius: 4, border: '1px solid #bdbdbd' }}>
+              <option value="">All</option>
+              {uniqueUsers.map(user => <option key={user} value={user}>{user}</option>)}
+            </select>
+          </label>
+          <button onClick={() => { setStatusFilter(''); setDateFilter(''); setUserFilter(''); }} style={{ marginLeft: 18, padding: '6px 18px', borderRadius: 6, border: '1px solid #bdbdbd', background: '#fff', color: '#388e3c', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>Clear Filters</button>
+        </div>
+        {filteredBookings.length === 0 ? (
+          <div style={{ textAlign: 'center', margin: '48px 0', color: '#888' }}>
+            <img src="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f3af.svg" alt="No bookings" style={{ width: 80, marginBottom: 16, opacity: 0.7 }} />
+            <div style={{ fontSize: 20, fontWeight: 500 }}>No bookings found.</div>
+            <div style={{ fontSize: 15, color: '#aaa', marginTop: 4 }}>Try adjusting your filters or check back later.</div>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto', marginTop: 8 }}>
+            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', fontSize: 15 }}>
+              <thead style={{ background: '#e8f5e9', position: 'sticky', top: 0, zIndex: 1 }}>
+                <tr>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Booking ID</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>User</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Phone</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Ground</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Date</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Time</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Advance Paid</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Status</th>
+                  <th style={{ padding: 14, borderBottom: '2px solid #c8e6c9', fontWeight: 700, color: '#1b5e20', background: '#e8f5e9' }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+                {paginatedBookings.map((b, i) => (
+                  <tr key={b._id} style={{ background: i % 2 === 0 ? '#f9fbe7' : '#fff', borderBottom: '1px solid #e0e0e0', transition: 'background 0.2s', cursor: 'pointer' }}
+                    onClick={() => setSelectedBooking(b)}>
+                    <td style={{ padding: 12 }}>{b.bookingId}</td>
+                    <td style={{ padding: 12, display: 'flex', alignItems: 'center' }}>
+                      <UserAvatar name={b.userId?.name || ''} />
+                      <span>{b.userId?.name}<br /><span style={{ color: '#888', fontSize: 13 }}>{b.userId?.email}</span></span>
+                    </td>
+                    <td style={{ padding: 12 }}>{b.playerDetails?.contactPerson?.phone || '-'}</td>
+                    <td style={{ padding: 12 }}>{b.groundId?.name} <br /> <span style={{ color: '#888', fontSize: 13 }}>{b.groundId?.location?.address}</span></td>
+                    <td style={{ padding: 12 }}>{new Date(b.bookingDate).toLocaleDateString()}</td>
+                    <td style={{ padding: 12 }}>{formatTimeRange(b.timeSlot.startTime, b.timeSlot.endTime)}</td>
+                    <td style={{ padding: 12, fontWeight: 600, color: '#2e7d32' }}>₹{b.pricing?.totalAmount || '-'}</td>
+                    <td style={{ padding: 12 }}>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '4px 12px',
+                        borderRadius: 12,
+                        background: b.status === 'pending' ? '#fffde7' : b.status === 'confirmed' ? '#e3fcec' : '#e0e0e0',
+                        color: b.status === 'pending' ? '#fbc02d' : b.status === 'confirmed' ? '#388e3c' : '#888',
+                        fontWeight: 700,
+                        fontSize: 15
+                      }}>{b.status.charAt(0).toUpperCase() + b.status.slice(1)}</span>
+                    </td>
+                    <td style={{ padding: 12 }}>
+                      {b.status === 'pending' && (
+                        <button onClick={() => handleApprove(b._id)} style={{ padding: '7px 16px', background: '#43a047', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #43a04722', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span role="img" aria-label="approve">✔️</span> Approve
+                        </button>
+                      )}
+                      {b.status !== 'completed' && (
+                        <button onClick={() => handleStatusChange('completed', b)} style={{ padding: '7px 16px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #1976d222', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span role="img" aria-label="complete">✅</span> Mark Completed
+                        </button>
+                      )}
+                      {b.status !== 'cancelled' && (
+                        <button onClick={() => handleStatusChange('cancelled', b)} style={{ padding: '7px 16px', background: '#e53935', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #e5393522', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span role="img" aria-label="cancel">❌</span> Cancel
+                        </button>
+                      )}
+                      <button onClick={() => handleSendReminder(b)} style={{ padding: '7px 16px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #6c757d22', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span role="img" aria-label="reminder">⚠️</span> Send Reminder
+                      </button>
+                      <button onClick={() => {}} style={{ padding: '7px 16px', background: '#43a047', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #43a04722', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span role="img" aria-label="download">⬇️</span> Download Invoice
+                      </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+            {/* Pagination Controls */}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', margin: '24px 0' }}>
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #bdbdbd', background: page === 1 ? '#eee' : '#fff', color: '#388e3c', fontWeight: 600, fontSize: 15, cursor: page === 1 ? 'not-allowed' : 'pointer', marginRight: 8 }}>Prev</button>
+              <span style={{ fontWeight: 600, fontSize: 16 }}>Page {page} of {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #bdbdbd', background: page === totalPages ? '#eee' : '#fff', color: '#388e3c', fontWeight: 600, fontSize: 15, cursor: page === totalPages ? 'not-allowed' : 'pointer', marginLeft: 8 }}>Next</button>
+            </div>
+          </div>
+        )}
+        {error && <div style={{ color: 'red', marginTop: 16 }}>{error}</div>}
+      </div>
+      {/* Booking Details Modal */}
+      {selectedBooking && <BookingDetailsModal booking={selectedBooking} onClose={() => setSelectedBooking(null)} onStatusChange={handleStatusChange} />}
     </div>
   );
 }
+
+function App() {
+  const [token, setToken] = useState(() => localStorage.getItem('ownerToken') || '');
+
+  const handleLogin = (token) => {
+    setToken(token);
+    localStorage.setItem('ownerToken', token);
+  };
+  const handleLogout = () => {
+    setToken('');
+    localStorage.removeItem('ownerToken');
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f5f5f5' }}>
+      {!token ? <Login onLogin={handleLogin} /> : <Dashboard token={token} onLogout={handleLogout} />}
+    </div>
+  );
+}
+
+export default App;

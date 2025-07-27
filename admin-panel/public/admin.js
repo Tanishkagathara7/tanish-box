@@ -5,7 +5,7 @@ let bookingsCache = [];
 let selectedBookingId = null;
 
 
-const BASE_API_URL = 'http://localhost:4000';
+const BASE_API_URL = 'http://localhost:3001';
 
 // Check if already logged in
 if (token) {
@@ -264,7 +264,7 @@ groundForm.addEventListener('submit', async (e) => {
     }
     if (formData.images.length === 0) {
         formData.images.push({ 
-            url: "https://via.placeholder.com/400x300/cccccc/666666?text=Ground+Image", 
+            url: "https://placehold.co/400x300?text=Ground+Image", 
             alt: formData.name, 
             isPrimary: true 
         });
@@ -322,9 +322,7 @@ hideAddGroundForm = function() {
 
 async function loadGrounds() {
     try {
-        const response = await fetch(`${BASE_API_URL}/api/admin/grounds`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await fetch('http://localhost:3001/api/admin/grounds');
         
         if (!response.ok) {
             if (response.status === 401) {
@@ -548,14 +546,22 @@ async function populateCityDropdown() {
 
 async function loadBookings() {
   const token = localStorage.getItem('adminToken');
-  if (!token) return;
+  if (!token) {
+    console.log('No admin token found');
+    return;
+  }
   try {
-    const response = await fetch(`${BASE_API_URL}/api/admin/bookings`, {
+    console.log('Fetching bookings from admin endpoint...');
+    const response = await fetch('http://localhost:3001/api/admin/bookings', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    console.log('Response status:', response.status);
     const data = await response.json();
+    console.log('Bookings response:', data);
     if (!data.success) throw new Error(data.message || 'Failed to fetch bookings');
     bookingsCache = data.bookings;
+    console.log('Loaded bookings:', bookingsCache.length);
+    console.log('Latest booking dates:', bookingsCache.slice(0, 3).map(b => new Date(b.bookingDate).toLocaleDateString()));
     renderBookingsTable(bookingsCache);
   } catch (error) {
     console.error('Error loading bookings:', error);
@@ -579,7 +585,7 @@ function renderBookingsTable(bookings) {
       <td>${userName}</td>
       <td>${groundName}</td>
       <td>${booking.bookingDate ? new Date(booking.bookingDate).toLocaleDateString() : ''}</td>
-      <td>${booking.timeSlot ? `${booking.timeSlot.startTime} - ${booking.timeSlot.endTime}` : ''}</td>
+      <td>${booking.timeSlot ? formatTimeRange(booking.timeSlot.startTime, booking.timeSlot.endTime) : ''}</td>
       <td>${booking.status || ''}</td>
       <td>${booking.pricing ? booking.pricing.totalAmount : ''}</td>
       <td>${actionHtml}</td>
@@ -591,7 +597,7 @@ function renderBookingsTable(bookings) {
     btn.onclick = async function() {
       const id = btn.getAttribute('data-confirm-id');
       try {
-        const response = await fetch(`${BASE_API_URL}/api/admin/bookings/${id}`, {
+        const response = await fetch(`http://localhost:3001/api/admin/bookings/${id}`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -612,6 +618,387 @@ function renderBookingsTable(bookings) {
     };
   });
 }
+
+// Helper: convert 24h time to 12h format for display
+function formatTime12h(time24h) {
+  // Add validation to ensure we're getting a proper time format
+  if (!time24h || typeof time24h !== 'string') {
+    console.error('Invalid time format:', time24h);
+    return time24h;
+  }
+  
+  // Check if it's a time range (contains '-')
+  if (time24h.includes('-')) {
+    console.error('Time range passed to formatTime12h:', time24h);
+    return time24h; // Return as-is if it's a range
+  }
+  
+  const [hours, minutes] = time24h.split(':');
+  if (!hours || !minutes) {
+    console.error('Invalid time format (missing hours or minutes):', time24h);
+    return time24h;
+  }
+  
+  const hour = parseInt(hours, 10);
+  if (isNaN(hour) || hour < 0 || hour > 23) {
+    console.error('Invalid hour:', hour, 'from time:', time24h);
+    return time24h;
+  }
+  
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  return `${hour12}:${minutes} ${ampm}`;
+}
+
+// Helper: format time range for display
+function formatTimeRange(startTime, endTime) {
+  return `${formatTime12h(startTime)} - ${formatTime12h(endTime)}`;
+}
+
+// Booking Form Functions
+function showAddBookingForm() {
+  document.getElementById('addBookingForm').style.display = 'block';
+  document.getElementById('bookingsTable').style.display = 'none';
+  populateBookingGrounds();
+  setMinDate();
+  resetBookingForm();
+}
+
+function hideAddBookingForm() {
+  document.getElementById('addBookingForm').style.display = 'none';
+  document.getElementById('bookingsTable').style.display = 'block';
+  document.getElementById('bookingForm').reset();
+}
+
+function setMinDate() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('bookingDate').min = today;
+  document.getElementById('bookingDate').value = today;
+}
+
+function resetBookingForm() {
+  document.getElementById('bookingForm').reset();
+  setMinDate();
+  document.getElementById('bookingStartTime').innerHTML = '<option value="">Select</option>';
+  document.getElementById('bookingEndTime').innerHTML = '<option value="">Select</option>';
+  document.getElementById('bookingStartTime').disabled = true;
+  document.getElementById('bookingEndTime').disabled = true;
+  document.getElementById('bookingDuration').textContent = '';
+}
+
+async function populateBookingGrounds() {
+  try {
+    console.log('Fetching grounds from main server...');
+    
+    // Connect directly to main server (no auth needed for grounds endpoint)
+    const response = await fetch('http://localhost:3001/api/admin/grounds');
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('Grounds API response:', data);
+    
+    // Check if response is an array (direct grounds response) or has success property
+    const grounds = Array.isArray(data) ? data : (data.success ? data.grounds : []);
+    
+    console.log('Processed grounds:', grounds);
+    console.log('Number of grounds found:', grounds ? grounds.length : 0);
+    
+    if (!grounds || grounds.length === 0) {
+      throw new Error('No grounds available');
+    }
+    
+    const groundSelect = document.getElementById('bookingGroundId');
+    groundSelect.innerHTML = '<option value="">Select Ground</option>';
+    
+    grounds.forEach(ground => {
+      const option = document.createElement('option');
+      option.value = ground._id;
+      option.textContent = ground.name;
+      groundSelect.appendChild(option);
+      console.log('Added ground option:', ground.name, 'with ID:', ground._id);
+    });
+    
+    console.log('Total options added to dropdown:', groundSelect.options.length - 1); // -1 for the "Select Ground" option
+  } catch (error) {
+    console.error('Error loading grounds:', error);
+    alert('Error loading grounds: ' + error.message);
+  }
+}
+
+// Generate all 24h time slots
+function getAll24hTimes() {
+  const times = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+  console.log('Generated 24h times:', times);
+  return times;
+}
+
+// Get available start times
+function getAvailableStartTimes() {
+  const times = getAll24hTimes();
+  const now = new Date();
+  const currentHour = now.getHours();
+  const selectedDate = document.getElementById('bookingDate').value;
+  const today = new Date().toISOString().split('T')[0];
+  
+  if (selectedDate === today) {
+    return times.filter(time => parseInt(time.split(':')[0], 10) > currentHour);
+  }
+  return times;
+}
+
+// Get available end times for a given start time
+function getAvailableEndTimes(startTime) {
+  if (!startTime) return [];
+  console.log('Getting end times for start time:', startTime);
+  
+  const allTimes = getAll24hTimes();
+  const startIdx = allTimes.indexOf(startTime);
+  console.log('Start time index:', startIdx);
+  
+  if (startIdx === -1) return [];
+  
+  const endTimes = [];
+  for (let i = startIdx + 1; i < 24; i++) {
+    endTimes.push(allTimes[i]);
+  }
+  console.log('Available end times:', endTimes);
+  return endTimes;
+}
+
+// Calculate duration
+function calculateDuration(startTime, endTime) {
+  if (!startTime || !endTime) return '';
+  const st = parseInt(startTime.split(':')[0], 10);
+  const et = parseInt(endTime.split(':')[0], 10);
+  let dur = et - st;
+  if (dur <= 0) dur += 24;
+  return dur;
+}
+
+// Update time slots when ground or date changes
+async function updateBookingTimeSlots() {
+  const groundId = document.getElementById('bookingGroundId').value;
+  const date = document.getElementById('bookingDate').value;
+  
+  if (!groundId || !date) {
+    document.getElementById('bookingStartTime').innerHTML = '<option value="">Select</option>';
+    document.getElementById('bookingStartTime').disabled = true;
+    document.getElementById('bookingEndTime').innerHTML = '<option value="">Select</option>';
+    document.getElementById('bookingEndTime').disabled = true;
+    return;
+  }
+  
+  try {
+    // Get available slots from server - use admin endpoint for individual time slots
+    const url = `http://localhost:3001/api/admin/bookings/ground/${groundId}/${date}`;
+    console.log('Calling admin availability endpoint:', url);
+    const response = await fetch(url);
+    const data = await response.json();
+    console.log('Availability API response:', data);
+    
+    let availableSlots = [];
+    if (data.success && data.availability) {
+      availableSlots = data.availability.availableSlots || [];
+      console.log('Using server-provided available slots:', availableSlots);
+    } else {
+      console.log('No server data, using fallback 24h times');
+      availableSlots = getAll24hTimes();
+    }
+    console.log('Available slots from server:', availableSlots);
+    
+    // Filter out past times for today
+    const now = new Date();
+    const today = new Date().toISOString().split('T')[0];
+    if (date === today) {
+      const currentHour = now.getHours();
+      availableSlots = availableSlots.filter(slot => {
+        const slotHour = parseInt(slot.split(':')[0], 10);
+        return slotHour > currentHour;
+      });
+    }
+    
+    // Populate start time dropdown
+    const startSelect = document.getElementById('bookingStartTime');
+    startSelect.innerHTML = '<option value="">Select</option>';
+    availableSlots.forEach(time => {
+      const option = document.createElement('option');
+      option.value = time;
+      console.log('Processing time slot:', time, 'Type:', typeof time);
+      const formattedTime = formatTime12h(time);
+      option.textContent = formattedTime;
+      console.log(`Time slot: "${time}" -> formatted: "${formattedTime}"`);
+      startSelect.appendChild(option);
+    });
+    startSelect.disabled = false;
+    
+    // Reset end time
+    document.getElementById('bookingEndTime').innerHTML = '<option value="">Select</option>';
+    document.getElementById('bookingEndTime').disabled = true;
+    document.getElementById('bookingDuration').textContent = '';
+    
+  } catch (error) {
+    console.error('Error loading time slots:', error);
+    alert('Error loading available time slots: ' + error.message);
+  }
+}
+
+// Update end time options when start time changes
+function updateBookingEndTimes() {
+  const startTime = document.getElementById('bookingStartTime').value;
+  const endSelect = document.getElementById('bookingEndTime');
+  
+  if (!startTime) {
+    endSelect.innerHTML = '<option value="">Select</option>';
+    endSelect.disabled = true;
+    document.getElementById('bookingDuration').textContent = '';
+    return;
+  }
+  
+  const endTimes = getAvailableEndTimes(startTime);
+  endSelect.innerHTML = '<option value="">Select</option>';
+  endTimes.forEach(time => {
+    const option = document.createElement('option');
+    option.value = time;
+    const formattedTime = formatTime12h(time);
+    option.textContent = formattedTime;
+    console.log(`End time slot: "${time}" -> formatted: "${formattedTime}"`);
+    endSelect.appendChild(option);
+  });
+  endSelect.disabled = false;
+}
+
+// Update duration display
+function updateBookingDuration() {
+  const startTime = document.getElementById('bookingStartTime').value;
+  const endTime = document.getElementById('bookingEndTime').value;
+  
+  if (startTime && endTime) {
+    const duration = calculateDuration(startTime, endTime);
+    const durationText = `${duration} hour(s) (${formatTimeRange(startTime, endTime)})`;
+    document.getElementById('bookingDuration').textContent = durationText;
+  } else {
+    document.getElementById('bookingDuration').textContent = '';
+  }
+}
+
+// Handle booking form submission
+async function handleBookingFormSubmit(e) {
+  e.preventDefault();
+  
+  const formData = {
+    groundId: document.getElementById('bookingGroundId').value,
+    bookingDate: document.getElementById('bookingDate').value,
+    startTime: document.getElementById('bookingStartTime').value,
+    endTime: document.getElementById('bookingEndTime').value,
+    teamName: document.getElementById('bookingTeamName').value,
+    playerCount: parseInt(document.getElementById('bookingPlayerCount').value),
+    contactName: document.getElementById('bookingContactName').value,
+    contactPhone: document.getElementById('bookingContactPhone').value,
+    contactEmail: document.getElementById('bookingContactEmail').value,
+    requirements: document.getElementById('bookingRequirements').value
+  };
+  
+  // Validation
+  if (!formData.groundId || !formData.bookingDate || !formData.startTime || !formData.endTime) {
+    alert('Please fill in all required fields');
+    return;
+  }
+  
+  if (formData.playerCount < 1) {
+    alert('Number of players must be at least 1');
+    return;
+  }
+  
+  if (!formData.contactName || !formData.contactPhone) {
+    alert('Contact person name and phone are required');
+    return;
+  }
+  
+  try {
+    const bookingData = {
+      groundId: formData.groundId,
+      bookingDate: formData.bookingDate,
+      timeSlot: `${formData.startTime}-${formData.endTime}`,
+      playerDetails: {
+        teamName: formData.teamName || undefined,
+        playerCount: formData.playerCount,
+        contactPerson: {
+          name: formData.contactName,
+          phone: formData.contactPhone,
+          email: formData.contactEmail || undefined
+        }
+      },
+      requirements: formData.requirements || undefined
+    };
+    
+    console.log('Sending booking data:', bookingData);
+    console.log('Booking date being sent:', formData.bookingDate);
+    console.log('Current date:', new Date().toISOString().split('T')[0]);
+    
+    const response = await fetch('http://localhost:3001/api/admin/bookings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(bookingData)
+    });
+    
+    const data = await response.json();
+    console.log('Booking creation response:', data);
+    if (data.success) {
+      alert('Booking created successfully!');
+      hideAddBookingForm();
+      console.log('Refreshing bookings list...');
+      await loadBookings(); // Refresh the bookings list
+      console.log('Bookings list refreshed');
+    } else {
+      alert('Error creating booking: ' + (data.message || 'Unknown error'));
+    }
+  } catch (error) {
+    console.error('Error creating booking:', error);
+    alert('Error creating booking: ' + error.message);
+  }
+}
+
+// Add event listeners when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+  // Booking form event listeners
+  const bookingForm = document.getElementById('bookingForm');
+  if (bookingForm) {
+    bookingForm.addEventListener('submit', handleBookingFormSubmit);
+  }
+  
+  // Ground selection change
+  const bookingGroundSelect = document.getElementById('bookingGroundId');
+  if (bookingGroundSelect) {
+    bookingGroundSelect.addEventListener('change', updateBookingTimeSlots);
+  }
+  
+  // Date change
+  const bookingDateInput = document.getElementById('bookingDate');
+  if (bookingDateInput) {
+    bookingDateInput.addEventListener('change', updateBookingTimeSlots);
+  }
+  
+  // Start time change
+  const bookingStartTimeSelect = document.getElementById('bookingStartTime');
+  if (bookingStartTimeSelect) {
+    bookingStartTimeSelect.addEventListener('change', function() {
+      updateBookingEndTimes();
+      updateBookingDuration();
+    });
+  }
+  
+  // End time change
+  const bookingEndTimeSelect = document.getElementById('bookingEndTime');
+  if (bookingEndTimeSelect) {
+    bookingEndTimeSelect.addEventListener('change', updateBookingDuration);
+  }
+});
 
 // Search functionality
 const bookingSearchInput = document.getElementById('bookingSearchInput');
@@ -789,3 +1176,18 @@ document.getElementById('confirmDeleteBookingBtn').onclick = async function() {
     alert('Error deleting booking: ' + err.message);
   }
 };
+
+// Refresh bookings function
+async function refreshBookings() {
+  console.log('Manual refresh of bookings...');
+  try {
+    await loadBookings();
+    console.log('Bookings refreshed successfully');
+  } catch (error) {
+    console.error('Error refreshing bookings:', error);
+    alert('Error refreshing bookings: ' + error.message);
+  }
+}
+
+// Make it available globally
+window.refreshBookings = refreshBookings;

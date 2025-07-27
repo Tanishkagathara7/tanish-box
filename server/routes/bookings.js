@@ -3,7 +3,17 @@ import { fallbackGrounds } from "../data/fallbackGrounds.js";
 import { authMiddleware } from "../middleware/auth.js";
 import Booking from "../models/Booking.js";
 import Ground from "../models/Ground.js";
+import User from "../models/User.js";
 import mongoose from "mongoose";
+import { 
+  doTimeRangesOverlap, 
+  validateTimeSlot, 
+  validateBookingDate, 
+  validateTimeSlotForToday,
+  calculateDuration, 
+  generateBookingId 
+} from "../lib/bookingUtils.js";
+import jwt from "jsonwebtoken";
 
 const router = express.Router();
 
@@ -40,6 +50,9 @@ function getPricing(ground, timeSlot) {
 
 // Create a booking (authenticated)
 router.post("/", authMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
     const { groundId, bookingDate, timeSlot, playerDetails, requirements } = req.body;
     const userId = req.userId;
@@ -72,6 +85,48 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
+    // Validate player details
+    if (!playerDetails.contactPerson || !playerDetails.contactPerson.name || !playerDetails.contactPerson.phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Contact person name and phone are required"
+      });
+    }
+
+    if (!playerDetails.playerCount || playerDetails.playerCount < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Number of players must be at least 1"
+      });
+    }
+
+    // Validate time slot format
+    const timeSlotValidation = validateTimeSlot(timeSlot);
+    if (!timeSlotValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: timeSlotValidation.error
+      });
+    }
+
+    // Validate booking date
+    const dateValidation = validateBookingDate(bookingDate);
+    if (!dateValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: dateValidation.error
+      });
+    }
+
+    // Validate time slot for today (if booking is for today)
+    const todayValidation = validateTimeSlotForToday(timeSlot, bookingDate);
+    if (!todayValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: todayValidation.error
+      });
+    }
+
     // Check if ground exists - handle both MongoDB and fallback grounds
     let ground = null;
     const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(groundId);
@@ -100,35 +155,53 @@ router.post("/", authMiddleware, async (req, res) => {
 
     console.log("Ground found:", ground.name);
 
+    // Check ground capacity
+    if (ground.features && ground.features.capacity && playerDetails.playerCount > ground.features.capacity) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum ${ground.features.capacity} players allowed for this ground`
+      });
+    }
+
     // Parse time slot (format: "10:00-12:00")
     const [startTime, endTime] = timeSlot.split("-");
     const start = new Date(`2000-01-01 ${startTime}`);
     const end = new Date(`2000-01-01 ${endTime}`);
-    const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+    const duration = calculateDuration(startTime, endTime);
 
     console.log("Time slot parsing:", { startTime, endTime, duration });
 
     // Check if slot is already booked (only for MongoDB grounds)
-    // Temporarily disabled to fix booking issues
-    /*
     if (isValidObjectId) {
-      const existingBooking = await Booking.findOne({
+      // Find any booking that overlaps with the requested slot
+      const existingBookings = await Booking.find({
         groundId,
         bookingDate: new Date(bookingDate),
-        "timeSlot.startTime": startTime,
-        "timeSlot.endTime": endTime,
         status: { $in: ["pending", "confirmed"] }
+      }).session(session);
+
+      // Check for overlaps using JavaScript logic
+      console.log(`Checking for overlaps with ${existingBookings.length} existing bookings`);
+      const overlappingBooking = existingBookings.find(booking => {
+        const bookingStart = new Date(`2000-01-01 ${booking.timeSlot.startTime}`);
+        const bookingEnd = new Date(`2000-01-01 ${booking.timeSlot.endTime}`);
+        
+        const hasOverlap = start < bookingEnd && end > bookingStart;
+        if (hasOverlap) {
+          console.log(`Found overlap: New booking (${startTime}-${endTime}) overlaps with existing booking (${booking.timeSlot.startTime}-${booking.timeSlot.endTime})`);
+        }
+        
+        return hasOverlap;
       });
 
-      if (existingBooking) {
-        console.log("Slot already booked");
+      if (overlappingBooking) {
+        console.log("Slot overlaps with an existing booking:", overlappingBooking.bookingId);
         return res.status(400).json({ 
           success: false, 
-          message: "Slot already booked" 
+          message: `This time slot (${startTime}-${endTime}) overlaps with an existing booking (${overlappingBooking.timeSlot.startTime}-${overlappingBooking.timeSlot.endTime}). Please select a different time.` 
         });
       }
     }
-    */
 
     // Calculate pricing
     const { baseAmount, discount, convenienceFee, totalAmount, duration: calcDuration } = getPricing(ground, timeSlot);
@@ -136,9 +209,7 @@ router.post("/", authMiddleware, async (req, res) => {
     console.log("Pricing calculation:", { baseAmount, discount, convenienceFee, totalAmount });
 
     // Generate unique booking ID
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substr(2, 5);
-    const bookingId = `BC${timestamp}${random}`.toUpperCase();
+    const bookingId = generateBookingId();
 
     // Create booking
     const booking = new Booking({
@@ -168,7 +239,7 @@ router.post("/", authMiddleware, async (req, res) => {
     });
 
     console.log("Saving booking...");
-    await booking.save();
+    await booking.save({ session });
     console.log("Booking saved successfully");
 
     // Populate ground details if it's a MongoDB ground
@@ -180,17 +251,22 @@ router.post("/", authMiddleware, async (req, res) => {
     }
 
     console.log("Booking created successfully:", booking.bookingId);
+    
+    await session.commitTransaction();
     res.json({ 
       success: true, 
       booking: booking.toObject() 
     });
 
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error creating booking:", error);
     res.status(500).json({ 
       success: false, 
       message: "Failed to create booking" 
     });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -292,6 +368,54 @@ router.get('/owner', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/bookings/owner/notifications - get notifications for ground owner
+router.get("/owner/notifications", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "No token provided" });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'ground_owner') {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    // Get owner's grounds
+    const ownerGrounds = await Ground.find({ ownerId: decoded.userId });
+    const groundIds = ownerGrounds.map(g => g._id);
+
+    // Get recent bookings (last 24 hours) for owner's grounds
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const recentBookings = await Booking.find({
+      groundId: { $in: groundIds },
+      createdAt: { $gte: yesterday }
+    })
+    .populate('userId', 'name email')
+    .populate('groundId', 'name location')
+    .sort({ createdAt: -1 })
+    .limit(10);
+
+    // Format notifications
+    const notifications = recentBookings.map(booking => ({
+      id: booking._id,
+      type: 'new_booking',
+      title: 'New Booking',
+      message: `Booking for ${booking.groundId.name} on ${new Date(booking.bookingDate).toLocaleDateString()} at ${booking.timeSlot.startTime}-${booking.timeSlot.endTime}`,
+      booking: booking,
+      timestamp: booking.createdAt,
+      read: false
+    }));
+
+    res.json({ success: true, notifications });
+  } catch (error) {
+    console.error("Error fetching notifications:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch notifications" });
+  }
+});
+
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const bookingId = req.params.id;
@@ -349,13 +473,27 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
     }
     const { status, reason } = req.body;
 
-    const booking = await Booking.findOne({ _id: bookingId, userId });
-
+    // Find the booking
+    const booking = await Booking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Booking not found" 
-      });
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    // Check if the user is the booking user or the ground owner
+    let isOwner = false;
+    if (booking.groundId) {
+      // If groundId is populated, use it directly; otherwise, fetch ground
+      let ground = booking.groundId;
+      if (typeof ground === 'string' || typeof ground === 'object' && ground._bsontype === 'ObjectID') {
+        ground = await Ground.findById(booking.groundId);
+      }
+      if (ground && ground.owner && String(ground.owner.userId) === String(userId)) {
+        isOwner = true;
+      }
+    }
+
+    if (String(booking.userId) !== String(userId) && !isOwner) {
+      return res.status(403).json({ success: false, message: "You do not have permission to update this booking." });
     }
 
     booking.status = status;
@@ -384,22 +522,62 @@ router.get("/ground/:groundId/:date", async (req, res) => {
   try {
     const { groundId, date } = req.params;
 
+    // Fetch all bookings for this ground and date
     const bookings = await Booking.find({
       groundId,
       bookingDate: date,
       status: { $in: ["pending", "confirmed"] }
     }).select("timeSlot status");
 
-    res.json({ 
-      success: true, 
-      bookings: bookings.map(booking => booking.toObject()) 
+    // Get all possible slots (24h)
+    const ALL_24H_SLOTS = Array.from({ length: 24 }, (_, i) => {
+      const start = `${i.toString().padStart(2, "0")}:00`;
+      const end = `${((i + 1) % 24).toString().padStart(2, "0")}:00`;
+      return `${start}-${end}`;
+    });
+
+    // Find booked slots and check for overlaps
+    const bookedSlots = [];
+    const availableSlots = [];
+
+    for (const slot of ALL_24H_SLOTS) {
+      const [slotStart, slotEnd] = slot.split("-");
+      const slotStartTime = new Date(`2000-01-01 ${slotStart}`);
+      const slotEndTime = new Date(`2000-01-01 ${slotEnd}`);
+      
+      let isSlotBooked = false;
+      
+      for (const booking of bookings) {
+        const bookingStart = new Date(`2000-01-01 ${booking.timeSlot.startTime}`);
+        const bookingEnd = new Date(`2000-01-01 ${booking.timeSlot.endTime}`);
+        
+        // Check if this slot overlaps with the booking
+        if (slotStartTime < bookingEnd && slotEndTime > bookingStart) {
+          isSlotBooked = true;
+          break;
+        }
+      }
+      
+      if (isSlotBooked) {
+        bookedSlots.push(slot);
+      } else {
+        availableSlots.push(slot);
+      }
+    }
+
+    res.json({
+      success: true,
+      availability: {
+        availableSlots,
+        bookedSlots
+      }
     });
 
   } catch (error) {
     console.error("Error fetching ground bookings:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to fetch ground bookings" 
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch ground bookings"
     });
   }
 });
@@ -441,12 +619,25 @@ router.post("/demo", (req, res) => {
   if (!ground) {
     return res.status(400).json({ success: false, message: "Ground not found" });
   }
-  // Check if slot is already booked
+  // Parse time slot (format: "10:00-12:00")
+  const [startTime, endTime] = timeSlot.split("-");
+  
+  // Validate time slot
+  const timeSlotValidation = validateTimeSlot(timeSlot);
+  if (!timeSlotValidation.isValid) {
+    return res.status(400).json({
+      success: false,
+      message: timeSlotValidation.error
+    });
+  }
+  
+  // Check if slot is already booked (overlap check)
   const alreadyBooked = demoBookings.some(
-    (b) => b.groundId === groundId && b.bookingDate === bookingDate && b.timeSlot === timeSlot
+    (b) => b.groundId === groundId && b.bookingDate === bookingDate && 
+    doTimeRangesOverlap(startTime, endTime, b.timeSlot.split("-")[0], b.timeSlot.split("-")[1])
   );
   if (alreadyBooked) {
-    return res.status(400).json({ success: false, message: "Slot already booked" });
+    return res.status(400).json({ success: false, message: "Slot overlaps with an existing booking" });
   }
   const pricing = getPricing(ground, timeSlot);
   const nowId = `${Date.now()}`;
@@ -528,11 +719,324 @@ const adminRouter = express.Router();
 // GET /api/admin/bookings - get all bookings
 adminRouter.get("/", async (req, res) => {
   try {
-    const bookings = await Booking.find({}).populate("userId", "name email").populate("groundId", "name location");
+    console.log('Admin fetching all bookings...');
+    console.log('Authorization header:', req.headers.authorization);
+    
+    // For now, let's allow all requests to see all bookings
+    // In production, you'd want to add proper admin authentication here
+    const bookings = await Booking.find({})
+      .populate("userId", "name email")
+      .populate("groundId", "name location")
+      .sort({ createdAt: -1 }); // Sort by most recent first
+    console.log(`Found ${bookings.length} bookings`);
+    
+    // Log some booking details for debugging
+    console.log('Recent bookings:');
+    bookings.slice(0, 5).forEach((booking, index) => {
+      console.log(`Booking ${index + 1}:`, {
+        id: booking._id,
+        bookingId: booking.bookingId,
+        userId: booking.userId?.name || booking.userId,
+        groundId: booking.groundId?.name || booking.groundId,
+        status: booking.status,
+        date: booking.bookingDate,
+        createdAt: booking.createdAt
+      });
+    });
+    
     res.json({ success: true, bookings });
   } catch (error) {
     console.error("Error fetching admin bookings:", error);
     res.status(500).json({ success: false, message: "Failed to fetch bookings" });
+  }
+});
+
+// GET /api/bookings/ground/:groundId/:date - get ground availability
+adminRouter.get("/ground/:groundId/:date", async (req, res) => {
+  try {
+    const { groundId, date } = req.params;
+    console.log(`Admin availability request for ground: ${groundId}, date: ${date}`);
+    
+    // Get all bookings for this ground on this date
+    const bookings = await Booking.find({
+      groundId,
+      bookingDate: new Date(date),
+      status: { $in: ["pending", "confirmed"] }
+    });
+    console.log(`Found ${bookings.length} existing bookings`);
+
+    // Generate all possible time slots (24 hours) - INDIVIDUAL TIMES, NOT RANGES
+    const allSlots = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+    console.log(`Generated all slots: ${allSlots.slice(0, 5)}... (${allSlots.length} total)`);
+    
+    // Filter out booked slots
+    const bookedSlots = new Set();
+    bookings.forEach(booking => {
+      const startHour = parseInt(booking.timeSlot.startTime.split(':')[0]);
+      const endHour = parseInt(booking.timeSlot.endTime.split(':')[0]);
+      for (let hour = startHour; hour < endHour; hour++) {
+        bookedSlots.add(`${hour.toString().padStart(2, '0')}:00`);
+      }
+    });
+    console.log(`Booked slots: ${Array.from(bookedSlots)}`);
+
+    const availableSlots = allSlots.filter(slot => !bookedSlots.has(slot));
+    console.log(`Available slots: ${availableSlots.slice(0, 10)}... (${availableSlots.length} total)`);
+
+    res.json({
+      success: true,
+      availability: {
+        date,
+        groundId,
+        availableSlots,
+        bookedSlots: Array.from(bookedSlots)
+      }
+    });
+
+  } catch (error) {
+    console.error("Error getting availability:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get availability"
+    });
+  }
+});
+
+// POST /api/admin/bookings - create a new booking (admin)
+adminRouter.post("/", async (req, res) => {
+  try {
+    console.log('Admin booking creation request:', req.body);
+    const { groundId, bookingDate, timeSlot, playerDetails, requirements } = req.body;
+    
+    // Validation
+    if (!groundId || !bookingDate || !timeSlot || !playerDetails) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields" 
+      });
+    }
+
+    // Validate player details
+    if (!playerDetails.contactPerson || !playerDetails.contactPerson.name || !playerDetails.contactPerson.phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Contact person name and phone are required"
+      });
+    }
+
+    if (!playerDetails.playerCount || playerDetails.playerCount < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Number of players must be at least 1"
+      });
+    }
+
+    // Check if ground exists
+    console.log('Looking for ground with ID:', groundId);
+    const ground = await Ground.findById(groundId);
+    if (!ground) {
+      console.log('Ground not found for ID:', groundId);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Ground not found" 
+      });
+    }
+    console.log('Found ground:', ground.name);
+
+    // Check ground capacity
+    if (ground.features && ground.features.capacity && playerDetails.playerCount > ground.features.capacity) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum ${ground.features.capacity} players allowed for this ground`
+      });
+    }
+
+    // Parse time slot
+    const [startTime, endTime] = timeSlot.split("-");
+    if (!startTime || !endTime) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time slot format. Use HH:MM-HH:MM"
+      });
+    }
+    
+    const start = new Date(`2000-01-01 ${startTime}`);
+    const end = new Date(`2000-01-01 ${endTime}`);
+    const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+    
+    // Validate duration
+    if (isNaN(duration) || duration <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time slot duration"
+      });
+    }
+    
+    console.log('Time slot parsing:', { startTime, endTime, duration });
+
+    // Check for overlapping bookings
+    const existingBookings = await Booking.find({
+      groundId,
+      bookingDate: new Date(bookingDate),
+      status: { $in: ["pending", "confirmed"] }
+    });
+
+    const overlappingBooking = existingBookings.find(booking => {
+      const bookingStart = new Date(`2000-01-01 ${booking.timeSlot.startTime}`);
+      const bookingEnd = new Date(`2000-01-01 ${booking.timeSlot.endTime}`);
+      return start < bookingEnd && end > bookingStart;
+    });
+
+    if (overlappingBooking) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `This time slot (${startTime}-${endTime}) overlaps with an existing booking (${overlappingBooking.timeSlot.startTime}-${overlappingBooking.timeSlot.endTime}). Please select a different time.` 
+      });
+    }
+
+    // Calculate pricing
+    console.log('Ground pricing:', ground.price);
+    const perHourPrice = ground.price?.perHour || 1000; // Default price if not set
+    console.log('Per hour price:', perHourPrice);
+    console.log('Duration:', duration);
+    const baseAmount = perHourPrice * duration;
+    const discount = ground.price?.discount || 0;
+    const discountedAmount = baseAmount - discount;
+    const convenienceFee = Math.round(discountedAmount * 0.02); // 2% convenience fee
+    const totalAmount = discountedAmount + convenienceFee;
+    
+    // Validate pricing calculations
+    if (isNaN(baseAmount) || isNaN(totalAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pricing calculation. Please check ground pricing."
+      });
+    }
+    
+    console.log('Pricing calculation:', {
+      perHourPrice,
+      duration,
+      baseAmount,
+      discount,
+      discountedAmount,
+      convenienceFee,
+      totalAmount
+    });
+
+    // Generate unique booking ID
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 5);
+    const bookingId = `BC${timestamp}${random}`.toUpperCase();
+
+    // Create booking (admin creates bookings)
+    // For admin bookings, we'll create or find a system user
+    let systemUser;
+    try {
+      systemUser = await User.findOne({ email: "system@boxcricket.com" });
+      if (!systemUser) {
+        // Create system user if it doesn't exist
+        // Use a unique phone number to avoid conflicts
+        const uniquePhone = `system${Date.now()}`;
+        systemUser = new User({
+          name: "System User",
+          email: "system@boxcricket.com",
+          phone: uniquePhone,
+          password: "system123", // This won't be used for login
+          role: "user",
+          isVerified: true
+        });
+        await systemUser.save();
+        console.log('Created system user:', systemUser._id);
+      } else {
+        console.log('Found existing system user:', systemUser._id);
+      }
+    } catch (userError) {
+      console.error('Error with system user:', userError);
+      return res.status(500).json({
+        success: false,
+        message: "Error creating system user for admin booking: " + userError.message
+      });
+    }
+    
+    console.log('Creating booking with data:', {
+      bookingId,
+      userId: systemUser._id,
+      groundId,
+      bookingDate: new Date(bookingDate),
+      timeSlot: { startTime, endTime, duration },
+      playerDetails: {
+        teamName: playerDetails.teamName,
+        playerCount: playerDetails.playerCount,
+        contactPerson: playerDetails.contactPerson,
+        requirements
+      },
+      pricing: {
+        baseAmount,
+        discount,
+        convenienceFee,
+        totalAmount,
+        currency: "INR"
+      }
+    });
+
+    const booking = new Booking({
+      bookingId,
+      userId: systemUser._id, // Use system user for admin bookings
+      groundId,
+      bookingDate: new Date(bookingDate),
+      timeSlot: {
+        startTime,
+        endTime,
+        duration
+      },
+      playerDetails: {
+        teamName: playerDetails.teamName,
+        playerCount: playerDetails.playerCount,
+        contactPerson: playerDetails.contactPerson,
+        requirements
+      },
+      pricing: {
+        baseAmount,
+        discount,
+        convenienceFee,
+        totalAmount,
+        currency: "INR"
+      },
+      status: "confirmed" // Admin-created bookings are automatically confirmed
+    });
+
+    try {
+      await booking.save();
+      console.log('Booking saved successfully:', booking._id);
+      console.log('Booking details:', {
+        bookingId: booking.bookingId,
+        date: booking.bookingDate,
+        timeSlot: booking.timeSlot,
+        status: booking.status,
+        createdAt: booking.createdAt
+      });
+    } catch (saveError) {
+      console.error('Error saving booking:', saveError);
+      return res.status(500).json({
+        success: false,
+        message: "Error saving booking: " + saveError.message
+      });
+    }
+    
+    // Populate ground details
+    await booking.populate("groundId", "name location price features");
+
+    res.json({ 
+      success: true, 
+      booking: booking.toObject() 
+    });
+
+  } catch (error) {
+    console.error("Error creating booking:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to create booking" 
+    });
   }
 });
 

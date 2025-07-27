@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { MapPin, Zap, Star, Clock, Sparkles, Search, Play, Trophy, Users, Shield, ChevronLeft, ChevronRight } from "lucide-react";
+import { MapPin, Zap, Star, Clock, Sparkles, Search, Play, Trophy, Users, Shield, ChevronLeft, ChevronRight, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Navbar from "@/components/Navbar";
@@ -22,6 +22,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { isMongoObjectId } from "@/lib/utils";
+import { bookingsApi } from "@/lib/api";
 
 // Demo data for testimonials
 const testimonials = [
@@ -62,8 +63,17 @@ const recentBookings = [
   "Rohit booked Rajiv Gandhi Stadium, Hyderabad",
 ];
 
+// Helper to merge and deduplicate notifications by id and status
+function mergeNotifications(oldNotifs: any[], newNotifs: any[]) {
+  const map = new Map();
+  [...oldNotifs, ...newNotifs].forEach(n => {
+    map.set(n.id + '-' + n.status, n);
+  });
+  return Array.from(map.values());
+}
+
 const Index = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const [selectedCity, setSelectedCity] = useState<City | undefined>();
   const [isLocationSelectorOpen, setIsLocationSelectorOpen] = useState(false);
@@ -77,6 +87,15 @@ const Index = () => {
 
   // State for testimonials carousel
   const [testimonialIndex, setTestimonialIndex] = useState(0);
+  const [notifications, setNotifications] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('boxcric_notifications');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
 
   // Auto-advance testimonials every 6 seconds
   useEffect(() => {
@@ -203,6 +222,41 @@ const Index = () => {
       setSelectedCity(JSON.parse(savedCity));
     }
   }, []);
+
+  // Fetch user booking notifications
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    const fetchNotifications = async () => {
+      try {
+        const res = await bookingsApi.getMyBookings();
+        if (res.data.success && Array.isArray(res.data.bookings)) {
+          const newNotifs = res.data.bookings.filter(
+            b => ["confirmed", "cancelled"].includes(b.status) && b.status !== "completed"
+          ).map(b => ({
+            id: b._id,
+            status: b.status,
+            ground: b.groundId?.name || b.groundId,
+            date: b.bookingDate,
+            time: b.timeSlot ? `${b.timeSlot.startTime} - ${b.timeSlot.endTime}` : '',
+            reason: b.cancellation?.reason || '',
+          }));
+          setNotifications(prevNotifs => {
+            const merged = mergeNotifications(prevNotifs, newNotifs);
+            localStorage.setItem('boxcric_notifications', JSON.stringify(merged));
+            return merged;
+          });
+        }
+      } catch {}
+    };
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 15000); // Poll every 15 seconds
+    return () => clearInterval(interval);
+  }, [isAuthenticated, user]);
+  // Clear all notifications
+  const clearNotifications = () => {
+    setNotifications([]);
+    localStorage.removeItem('boxcric_notifications');
+  };
 
   const fetchGrounds = async () => {
     if (!selectedCity) return;
@@ -341,6 +395,10 @@ const Index = () => {
         onCitySelect={() => setIsLocationSelectorOpen(true)}
         onSearch={handleSearch}
         onFilterToggle={() => setIsFilterPanelOpen(true)}
+        notifications={notifications}
+        showNotifDropdown={showNotifDropdown}
+        setShowNotifDropdown={setShowNotifDropdown}
+        clearNotifications={clearNotifications}
       />
 
       {/* Enhanced Hero Section */}

@@ -117,6 +117,15 @@ bookingSchema.index({ status: 1 });
 bookingSchema.index({ "payment.status": 1 });
 bookingSchema.index({ bookingId: 1 });
 
+// Compound index for overlap checking
+bookingSchema.index({ 
+  groundId: 1, 
+  bookingDate: 1, 
+  status: 1,
+  "timeSlot.startTime": 1,
+  "timeSlot.endTime": 1
+});
+
 // Generate unique booking ID
 bookingSchema.pre("save", async function (next) {
   if (!this.bookingId) {

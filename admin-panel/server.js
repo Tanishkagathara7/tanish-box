@@ -7,11 +7,8 @@ import jwt from 'jsonwebtoken';
 import bodyParser from 'body-parser';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import Booking from '../server/models/Booking.js'; // Import Booking model from main server
-import User from '../server/models/User.js'; // Import User model for population
-import Ground from '../server/models/Ground.js'; // Import Ground model for population
-import Location from '../server/models/Location.js'; // Import Location model for location endpoints
 import bcrypt from 'bcryptjs';
+import fetch from 'node-fetch';
 
 // --- Fix for __dirname in ES modules ---
 const __filename = fileURLToPath(import.meta.url);
@@ -54,25 +51,19 @@ app.post('/api/admin/login', (req, res) => {
 
 // --- Grounds CRUD ---
 app.get('/api/admin/grounds', adminAuth, async (req, res) => {
-  const grounds = await Ground.find();
-  // For each ground, fetch the owner's password from the User model
-  const groundsWithPasswords = await Promise.all(grounds.map(async (ground) => {
-    let ownerPassword = '';
-    if (ground.owner && ground.owner.userId) {
-      const user = await User.findById(ground.owner.userId).lean();
-      if (user && user.password) {
-        ownerPassword = user.password; // INSECURE: plain text or hashed
+  try {
+    // Forward the request to the main server with authorization header
+    const response = await fetch('http://localhost:3001/api/admin/grounds', {
+      headers: {
+        'Authorization': req.headers.authorization
       }
-    }
-    return {
-      ...ground.toObject(),
-      owner: {
-        ...ground.owner,
-        password: ownerPassword
-      }
-    };
-  }));
-  res.json(groundsWithPasswords);
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Error fetching grounds:', error);
+    res.status(500).json({ message: 'Failed to fetch grounds' });
+  }
 });
 
 app.post('/api/admin/grounds', adminAuth, async (req, res) => {
@@ -220,6 +211,181 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
     res.json({ success: true, bookings });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Failed to fetch bookings', error: err.message });
+  }
+});
+
+// --- Admin: Get Ground Availability ---
+app.get('/api/bookings/ground/:groundId/:date', async (req, res) => {
+  try {
+    const { groundId, date } = req.params;
+    
+    // Get all bookings for this ground on this date
+    const bookings = await Booking.find({
+      groundId,
+      bookingDate: new Date(date),
+      status: { $in: ["pending", "confirmed"] }
+    });
+
+    // Generate all possible time slots (24 hours)
+    const allSlots = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+    
+    // Filter out booked slots
+    const bookedSlots = new Set();
+    bookings.forEach(booking => {
+      const startHour = parseInt(booking.timeSlot.startTime.split(':')[0]);
+      const endHour = parseInt(booking.timeSlot.endTime.split(':')[0]);
+      for (let hour = startHour; hour < endHour; hour++) {
+        bookedSlots.add(`${hour.toString().padStart(2, '0')}:00`);
+      }
+    });
+
+    const availableSlots = allSlots.filter(slot => !bookedSlots.has(slot));
+
+    res.json({
+      success: true,
+      availability: {
+        date,
+        groundId,
+        availableSlots,
+        bookedSlots: Array.from(bookedSlots)
+      }
+    });
+
+  } catch (error) {
+    console.error("Error getting availability:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get availability"
+    });
+  }
+});
+
+// --- Admin: Create New Booking ---
+app.post('/api/admin/bookings', adminAuth, async (req, res) => {
+  try {
+    const { groundId, bookingDate, timeSlot, playerDetails, requirements } = req.body;
+    
+    // Validation
+    if (!groundId || !bookingDate || !timeSlot || !playerDetails) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields" 
+      });
+    }
+
+    // Validate player details
+    if (!playerDetails.contactPerson || !playerDetails.contactPerson.name || !playerDetails.contactPerson.phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Contact person name and phone are required"
+      });
+    }
+
+    if (!playerDetails.playerCount || playerDetails.playerCount < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Number of players must be at least 1"
+      });
+    }
+
+    // Check if ground exists
+    const ground = await Ground.findById(groundId);
+    if (!ground) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Ground not found" 
+      });
+    }
+
+    // Check ground capacity
+    if (ground.features && ground.features.capacity && playerDetails.playerCount > ground.features.capacity) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum ${ground.features.capacity} players allowed for this ground`
+      });
+    }
+
+    // Parse time slot
+    const [startTime, endTime] = timeSlot.split("-");
+    const start = new Date(`2000-01-01 ${startTime}`);
+    const end = new Date(`2000-01-01 ${endTime}`);
+    const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+
+    // Check for overlapping bookings
+    const existingBookings = await Booking.find({
+      groundId,
+      bookingDate: new Date(bookingDate),
+      status: { $in: ["pending", "confirmed"] }
+    });
+
+    const overlappingBooking = existingBookings.find(booking => {
+      const bookingStart = new Date(`2000-01-01 ${booking.timeSlot.startTime}`);
+      const bookingEnd = new Date(`2000-01-01 ${booking.timeSlot.endTime}`);
+      return start < bookingEnd && end > bookingStart;
+    });
+
+    if (overlappingBooking) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `This time slot (${startTime}-${endTime}) overlaps with an existing booking (${overlappingBooking.timeSlot.startTime}-${overlappingBooking.timeSlot.endTime}). Please select a different time.` 
+      });
+    }
+
+    // Calculate pricing
+    const baseAmount = ground.price.perHour * duration;
+    const discount = ground.price?.discount || 0;
+    const discountedAmount = baseAmount - discount;
+    const convenienceFee = Math.round(discountedAmount * 0.02); // 2% convenience fee
+    const totalAmount = discountedAmount + convenienceFee;
+
+    // Generate unique booking ID
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 5);
+    const bookingId = `BC${timestamp}${random}`.toUpperCase();
+
+    // Create booking (admin creates bookings without a specific user)
+    const booking = new Booking({
+      bookingId,
+      userId: null, // Admin-created bookings don't have a specific user
+      groundId,
+      bookingDate: new Date(bookingDate),
+      timeSlot: {
+        startTime,
+        endTime,
+        duration
+      },
+      playerDetails: {
+        teamName: playerDetails.teamName,
+        playerCount: playerDetails.playerCount,
+        contactPerson: playerDetails.contactPerson,
+        requirements
+      },
+      pricing: {
+        baseAmount,
+        discount,
+        convenienceFee,
+        totalAmount,
+        currency: "INR"
+      },
+      status: "confirmed" // Admin-created bookings are automatically confirmed
+    });
+
+    await booking.save();
+    
+    // Populate ground details
+    await booking.populate("groundId", "name location price features");
+
+    res.json({ 
+      success: true, 
+      booking: booking.toObject() 
+    });
+
+  } catch (error) {
+    console.error("Error creating booking:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to create booking" 
+    });
   }
 });
 

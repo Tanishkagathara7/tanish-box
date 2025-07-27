@@ -225,9 +225,63 @@
       <section id="bookingsSection" style="display: none;">
         <div class="section-header">
           <h2>All Bookings</h2>
+          <button onclick="showAddBookingForm()" class="btn-primary">Add New Booking</button>
+          <button onclick="refreshBookings()" class="btn-secondary" style="margin-left: 8px;">🔄 Refresh</button>
           <input type="text" id="bookingSearchInput" placeholder="Search bookings..." style="margin-left: 16px; padding: 4px 8px; width: 220px;">
         </div>
-        <div class="section-content">
+
+        <!-- Add Booking Form -->
+        <div id="addBookingForm" style="display: none;" class="form-container">
+          <h3>Add New Booking</h3>
+          <form id="bookingForm">
+            <!-- Ground Selection -->
+            <div class="form-group">
+              <h4>Ground Selection</h4>
+              <select id="bookingGroundId" required>
+                <option value="">Select Ground</option>
+              </select>
+            </div>
+
+            <!-- Date and Time -->
+            <div class="form-group">
+              <h4>Date and Time</h4>
+              <input type="date" id="bookingDate" min="" required>
+              <div style="display: flex; gap: 12px;">
+                <div style="flex: 1;">
+                  <label>Start Time *</label>
+                  <select id="bookingStartTime" required disabled>
+                    <option value="">Select</option>
+                  </select>
+                </div>
+                <div style="flex: 1;">
+                  <label>End Time *</label>
+                  <select id="bookingEndTime" required disabled>
+                    <option value="">Select</option>
+                  </select>
+                </div>
+              </div>
+              <div id="bookingDuration" style="margin-top: 8px; color: #388e3c; font-weight: 600;"></div>
+            </div>
+
+            <!-- Player Details -->
+            <div class="form-group">
+              <h4>Player Details</h4>
+              <input type="text" id="bookingTeamName" placeholder="Team Name (optional)">
+              <input type="number" id="bookingPlayerCount" placeholder="Number of Players *" min="1" required>
+              <input type="text" id="bookingContactName" placeholder="Contact Person Name *" required>
+              <input type="tel" id="bookingContactPhone" placeholder="Contact Phone *" required>
+              <input type="email" id="bookingContactEmail" placeholder="Contact Email (optional)">
+              <textarea id="bookingRequirements" placeholder="Special Requirements (optional)" rows="2"></textarea>
+            </div>
+
+            <!-- Form Actions -->
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Create Booking</button>
+              <button type="button" onclick="hideAddBookingForm()" class="btn-secondary">Cancel</button>
+            </div>
+          </form>
+        </div>
+        <div class="section-content" id="bookingsTable">
           <table class="admin-table">
             <thead>
               <tr>
