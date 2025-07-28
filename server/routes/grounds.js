@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import Ground from "../models/Ground.js";
 import { fallbackGrounds } from "../data/fallbackGrounds.js";
 import Booking from "../models/Booking.js";
@@ -875,8 +876,229 @@ async function getAllGroundsAdminHandler(req, res) {
 // --- ADMIN ROUTER ---
 // This router exposes the same GET endpoints as the main grounds router, but under /api/admin/grounds for admin panel use.
 const adminRouter = express.Router();
-adminRouter.get("/", getAllGroundsAdminHandler); // Use admin-specific handler
-adminRouter.get("/:id", getGroundByIdHandler);
+
+// Import required models for admin operations
+import Location from "../models/Location.js";
+
+// Simple admin auth middleware (in production, use proper JWT validation)
+const adminAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
+  // For now, just check if token exists (in production, validate JWT)
+  next();
+};
+
+// GET endpoints
+adminRouter.get("/", adminAuth, getAllGroundsAdminHandler); // Use admin-specific handler
+adminRouter.get("/:id", adminAuth, getGroundByIdHandler);
+
+// POST endpoint for creating grounds
+adminRouter.post("/", adminAuth, async (req, res) => {
+  try {
+    // Validate cityId
+    const city = await Location.findOne({ id: req.body.location.cityId });
+    if (!city) return res.status(400).json({ message: 'Invalid cityId' });
+    
+    // Update location with city data
+    req.body.location = {
+      cityId: city.id,
+      cityName: city.name,
+      state: city.state,
+      latitude: city.latitude,
+      longitude: city.longitude,
+      address: req.body.location.address,
+      pincode: req.body.location.pincode
+    };
+
+    // Create or update owner in User model
+    let user = await User.findOne({ email: req.body.owner.email });
+    if (!user) {
+      user = await User.create({
+        name: req.body.owner.name,
+        email: req.body.owner.email,
+        phone: req.body.owner.contact,
+        password: req.body.owner.password,
+        role: 'ground_owner',
+        isVerified: true
+      });
+    } else {
+      user.name = req.body.owner.name;
+      user.phone = req.body.owner.contact;
+      user.role = 'ground_owner'; // Always ensure role is ground_owner for admin-created users
+      if (req.body.owner.password) user.password = req.body.owner.password;
+      user.isVerified = true;
+      await user.save();
+    }
+
+    // Set userId in ground owner (ensure it's a string)
+    const groundData = {
+      ...req.body,
+      status: "active",
+      isVerified: true,
+      owner: {
+        ...req.body.owner,
+        userId: user._id.toString(),
+      },
+      availability: req.body.availability || {
+        timeSlots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"],
+        blockedDates: [],
+        weeklySchedule: {
+          monday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
+          tuesday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
+          wednesday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
+          thursday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
+          friday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
+          saturday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
+          sunday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] }
+        }
+      }
+    };
+
+    const ground = await Ground.create(groundData);
+    res.json(ground);
+  } catch (err) {
+    console.error('Error creating ground:', err);
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// PUT endpoint for updating grounds
+adminRouter.put("/:id", adminAuth, async (req, res) => {
+  try {
+    console.log('PUT request body:', JSON.stringify(req.body, null, 2));
+    
+    // Validate cityId
+    const city = await Location.findOne({ id: req.body.location.cityId });
+    if (!city) return res.status(400).json({ message: 'Invalid cityId' });
+    
+    // Update location with city data
+    req.body.location.cityName = city.name;
+    req.body.location.state = city.state;
+    req.body.location.latitude = city.latitude;
+    req.body.location.longitude = city.longitude;
+
+    // Handle owner updates - completely remove problematic userId to avoid ObjectId issues
+    if (req.body.owner) {
+      console.log('Original owner.userId:', req.body.owner.userId, 'Type:', typeof req.body.owner.userId);
+      
+      // Update owner password if provided
+      if (req.body.owner.password) {
+        let user = null;
+        if (req.body.owner.userId && req.body.owner.userId !== 'undefined' && req.body.owner.userId !== '') {
+          // Ensure userId is a string, not an object
+          let userId = req.body.owner.userId;
+          if (typeof userId === 'object') {
+            userId = userId.toString();
+          }
+          
+          // Only try to find user if userId is a valid ObjectId
+          if (mongoose.Types.ObjectId.isValid(userId) && userId !== '[object Object]') {
+            console.log('Looking for user with ID:', userId);
+            try {
+              user = await User.findById(userId);
+            } catch (err) {
+              console.log('Error finding user by ID:', err.message);
+            }
+          } else {
+            console.log('Invalid userId, skipping user lookup by ID:', userId);
+          }
+        }
+        if (!user && req.body.owner.email) {
+          console.log('Looking for user with email:', req.body.owner.email);
+          try {
+            user = await User.findOne({ email: req.body.owner.email });
+          } catch (err) {
+            console.log('Error finding user by email:', err.message);
+          }
+        }
+        if (user) {
+          user.password = req.body.owner.password; // Save as plain text
+          user.role = 'ground_owner'; // Always ensure role is ground_owner for admin-created users
+          await user.save();
+          console.log('User password and role updated');
+        } else {
+          console.log('No user found to update password');
+          // Create new user if not found
+          if (req.body.owner.email) {
+            try {
+              user = await User.create({
+                name: req.body.owner.name,
+                email: req.body.owner.email,
+                phone: req.body.owner.contact,
+                password: req.body.owner.password,
+                role: 'ground_owner',
+                isVerified: true
+              });
+              console.log('New user created for ground owner');
+            } catch (err) {
+              console.log('Error creating new user:', err.message);
+            }
+          }
+        }
+      }
+      
+      // Clean up owner object before updating ground
+      delete req.body.owner.password;
+      
+      // Completely remove userId from update to avoid ObjectId casting issues
+      // The existing userId in the database will remain unchanged
+      delete req.body.owner.userId;
+      console.log('Removed userId from update to avoid ObjectId issues');
+      
+      console.log('Final owner object:', req.body.owner);
+    }
+
+    console.log('Final request body for update:', JSON.stringify(req.body, null, 2));
+    
+    // Use $set to update only specific fields and avoid validation issues
+    const updateData = { $set: {} };
+    
+    // Add each field individually to avoid ObjectId issues
+    if (req.body.name) updateData.$set.name = req.body.name;
+    if (req.body.description) updateData.$set.description = req.body.description;
+    if (req.body.location) updateData.$set.location = req.body.location;
+    if (req.body.price) updateData.$set.price = req.body.price;
+    if (req.body.images) updateData.$set.images = req.body.images;
+    if (req.body.amenities) updateData.$set.amenities = req.body.amenities;
+    if (req.body.features) updateData.$set.features = req.body.features;
+    if (req.body.rating) updateData.$set.rating = req.body.rating;
+    if (req.body.status) updateData.$set.status = req.body.status;
+    if (req.body.isVerified !== undefined) updateData.$set.isVerified = req.body.isVerified;
+    if (req.body.policies) updateData.$set.policies = req.body.policies;
+    
+    // Handle owner separately - only update non-ObjectId fields
+    if (req.body.owner) {
+      updateData.$set.owner = {
+        name: req.body.owner.name,
+        contact: req.body.owner.contact,
+        email: req.body.owner.email,
+        verified: req.body.owner.verified
+      };
+      // Don't include userId to avoid ObjectId issues
+    }
+    
+    console.log('Using $set update:', JSON.stringify(updateData, null, 2));
+    const ground = await Ground.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    res.json(ground);
+  } catch (err) {
+    console.error('Error updating ground:', err);
+    console.error('Error stack:', err.stack);
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// DELETE endpoint for deleting grounds
+adminRouter.delete("/:id", adminAuth, async (req, res) => {
+  try {
+    await Ground.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting ground:', err);
+    res.status(400).json({ message: err.message });
+  }
+});
 
 export { adminRouter };
 

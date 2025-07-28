@@ -258,8 +258,6 @@ function Dashboard({ token, onLogout }) {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [page, setPage] = useState(1);
   const pageSize = 10;
-  const paginatedBookings = bookings.slice((page - 1) * pageSize, page * pageSize);
-  const totalPages = Math.ceil(bookings.length / pageSize);
   const [Toasts, showToast] = useToast();
   const [showProfile, setShowProfile] = useState(false);
   const [profile, setProfile] = useState({ name: '', email: '', phone: '', notifications: true });
@@ -357,9 +355,24 @@ function Dashboard({ token, onLogout }) {
   useEffect(() => {
     async function fetchData() {
       try {
+        console.log('Fetching user data with token:', token ? 'Token exists' : 'No token');
         const meRes = await fetch('http://localhost:3001/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
         const me = await meRes.json();
-        if (!me.success || me.user.role !== 'ground_owner') throw new Error('Not a ground owner');
+        console.log('Auth me response:', me);
+        
+        if (!me.success) {
+          throw new Error('Failed to get user data: ' + (me.message || 'Unknown error'));
+        }
+        
+        if (!me.user) {
+          throw new Error('No user data received');
+        }
+        
+        console.log('User role:', me.user.role);
+        if (me.user.role !== 'ground_owner') {
+          throw new Error('Not a ground owner. User role: ' + me.user.role);
+        }
+        
         setOwner(me.user);
         const groundsRes = await fetch('http://localhost:3001/api/grounds/owner', { headers: { Authorization: `Bearer ${token}` } });
         const groundsData = await groundsRes.json();
@@ -374,6 +387,7 @@ function Dashboard({ token, onLogout }) {
           Notification.requestPermission();
         }
       } catch (err) {
+        console.error('Error in fetchData:', err);
         setError('Failed to load dashboard: ' + err.message);
       }
     }
@@ -530,24 +544,61 @@ function Dashboard({ token, onLogout }) {
   // Filtering logic (add search)
   const filteredBookings = bookings.filter(b => {
     let match = true;
-    if (statusFilter && b.status !== statusFilter) match = false;
+    
+    // Status filter
+    if (statusFilter && b.status !== statusFilter) {
+      match = false;
+    }
+    
+    // Date filter
     if (dateFilter) {
-      const bookingDate = new Date(b.bookingDate).toISOString().slice(0, 10);
-      if (bookingDate !== dateFilter) match = false;
+      const bookingDate = new Date(b.bookingDate);
+      const bookingDateStr = bookingDate.toISOString().slice(0, 10);
+      if (bookingDateStr !== dateFilter) {
+        match = false;
+      }
     }
+    
+    // User filter
     if (userFilter && b.userId && b.userId.name) {
-      if (!b.userId.name.toLowerCase().includes(userFilter.toLowerCase())) match = false;
+      if (!b.userId.name.toLowerCase().includes(userFilter.toLowerCase())) {
+        match = false;
+      }
     }
+    
+    // Search filter
     if (search) {
       const s = search.toLowerCase();
-      if (!(
-        (b.userId?.name && b.userId.name.toLowerCase().includes(s)) ||
-        (b.playerDetails?.contactPerson?.phone && b.playerDetails.contactPerson.phone.includes(s)) ||
-        (b.bookingId && b.bookingId.toLowerCase().includes(s))
-      )) match = false;
+      const searchableFields = [
+        b.userId?.name || '',
+        b.playerDetails?.contactPerson?.phone || '',
+        b.bookingId || '',
+        b.groundId?.name || '',
+        b.playerDetails?.teamName || ''
+      ];
+      
+      const hasMatch = searchableFields.some(field => 
+        field.toLowerCase().includes(s)
+      );
+      
+      if (!hasMatch) {
+        match = false;
+      }
     }
+    
     return match;
   });
+  
+
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, dateFilter, userFilter, search]);
+
+  // Pagination calculations
+  const paginatedBookings = filteredBookings.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.ceil(filteredBookings.length / pageSize);
 
   // Analytics
   const totalBookings = bookings.length;
@@ -778,51 +829,247 @@ function Dashboard({ token, onLogout }) {
   const uniqueUsers = Array.from(new Set(bookings.map(b => b.userId?.name).filter(Boolean)));
 
   return (
-    <div style={{ maxWidth: 1200, margin: '40px auto', padding: 0, background: '#f7fafc', borderRadius: 18, boxShadow: '0 4px 32px #0002', fontFamily: 'Segoe UI, Arial, sans-serif' }}>
-      <Toasts />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '32px 40px 0 40px' }}>
-        <h2 style={{ fontSize: 32, fontWeight: 800, color: '#1b5e20', letterSpacing: 1 }}>Welcome, {owner.name} <span style={{ fontWeight: 400, color: '#333', fontSize: 20 }}>(Ground Owner)</span></h2>
-        <div style={{ display: 'flex', gap: 16 }}>
+    <>
+      <style>
+        {`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+          }
+          
+          @keyframes slideIn {
+            from { 
+              transform: translateY(20px);
+              opacity: 0;
+            }
+            to { 
+              transform: translateY(0);
+              opacity: 1;
+            }
+          }
+          
+          @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          
+          .animate-slide-in {
+            animation: slideIn 0.6s ease-out;
+          }
+          
+          .animate-fade-in {
+            animation: fadeIn 0.4s ease-out;
+          }
+          
+          .hover-lift {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+          }
+          
+          .hover-lift:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+          }
+        `}
+      </style>
+      <div style={{ 
+        maxWidth: 1200, 
+        margin: '40px auto', 
+        padding: 0, 
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+        borderRadius: 20, 
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.15)', 
+        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        minHeight: '100vh'
+      }}>
+        <Toasts />
+      
+      {/* Enhanced Header */}
+      <div style={{ 
+        background: 'rgba(255, 255, 255, 0.95)', 
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+        padding: '24px 40px',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{
+            width: 48,
+            height: 48,
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            borderRadius: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontSize: 20,
+            fontWeight: 700,
+            boxShadow: '0 4px 15px rgba(102, 126, 234, 0.3)'
+          }}>
+            🏏
+          </div>
+          <div>
+            <h2 style={{ 
+              fontSize: 28, 
+              fontWeight: 800, 
+              color: '#1a1a1a', 
+              margin: 0,
+              letterSpacing: '-0.5px'
+            }}>
+              Welcome back, {owner.name}
+            </h2>
+            <p style={{ 
+              fontSize: 14, 
+              color: '#666', 
+              margin: 0,
+              fontWeight: 500
+            }}>
+              Ground Owner Dashboard
+            </p>
+          </div>
+        </div>
+        
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button 
             onClick={() => setShowNotifications(!showNotifications)} 
             data-notification-button
             style={{ 
-              padding: '10px 24px', 
-              borderRadius: 8, 
+              padding: '12px 20px', 
+              borderRadius: 12, 
               border: 'none', 
-              background: unreadCount > 0 ? '#ff9800' : '#757575', 
-              color: '#fff', 
-              fontWeight: 700, 
-              fontSize: 16, 
+              background: unreadCount > 0 
+                ? 'linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%)' 
+                : 'rgba(255, 255, 255, 0.9)', 
+              color: unreadCount > 0 ? '#fff' : '#666', 
+              fontWeight: 600, 
+              fontSize: 14, 
               cursor: 'pointer', 
-              boxShadow: '0 2px 8px #0002',
-              position: 'relative'
+              boxShadow: unreadCount > 0 ? '0 4px 15px rgba(255, 107, 107, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.1)',
+              position: 'relative',
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = unreadCount > 0 ? '0 6px 20px rgba(255, 107, 107, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = unreadCount > 0 ? '0 4px 15px rgba(255, 107, 107, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.1)';
             }}
           >
             🔔 Notifications
             {unreadCount > 0 && (
               <span style={{
                 position: 'absolute',
-                top: -8,
-                right: -8,
-                background: '#e53935',
-                color: '#fff',
+                top: -6,
+                right: -6,
+                background: '#fff',
+                color: '#ff6b6b',
                 borderRadius: '50%',
                 width: 20,
                 height: 20,
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                border: '2px solid #fff',
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                animation: 'pulse 2s infinite'
               }}>
                 {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             )}
           </button>
-          <button onClick={() => setShowAddBooking(true)} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#43a047', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #43a04722' }}>+ Add Booking</button>
-          <button onClick={() => setShowProfile(p => !p)} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#1976d2', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #1976d222' }}>Profile & Settings</button>
-          <button onClick={onLogout} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#e53935', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #e5393522' }}>Logout</button>
+          
+          <button 
+            onClick={() => setShowAddBooking(true)} 
+            style={{ 
+              padding: '12px 24px', 
+              borderRadius: 12, 
+              border: 'none', 
+              background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)', 
+              color: '#fff', 
+              fontWeight: 600, 
+              fontSize: 14, 
+              cursor: 'pointer', 
+              boxShadow: '0 4px 15px rgba(76, 175, 80, 0.3)',
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 6px 20px rgba(76, 175, 80, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.3)';
+            }}
+          >
+            ➕ Add Booking
+          </button>
+          
+          <button 
+            onClick={() => setShowProfile(p => !p)} 
+            style={{ 
+              padding: '12px 20px', 
+              borderRadius: 12, 
+              border: 'none', 
+              background: 'rgba(255, 255, 255, 0.9)', 
+              color: '#666', 
+              fontWeight: 600, 
+              fontSize: 14, 
+              cursor: 'pointer', 
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.background = 'rgba(255, 255, 255, 1)';
+              e.target.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.background = 'rgba(255, 255, 255, 0.9)';
+              e.target.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+            }}
+          >
+            ⚙️ Settings
+          </button>
+          
+          <button 
+            onClick={onLogout} 
+            style={{ 
+              padding: '12px 20px', 
+              borderRadius: 12, 
+              border: 'none', 
+              background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%)', 
+              color: '#fff', 
+              fontWeight: 600, 
+              fontSize: 14, 
+              cursor: 'pointer', 
+              boxShadow: '0 4px 15px rgba(255, 107, 107, 0.3)',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 6px 20px rgba(255, 107, 107, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = '0 4px 15px rgba(255, 107, 107, 0.3)';
+            }}
+          >
+            🚪 Logout
+          </button>
         </div>
       </div>
       
@@ -1073,90 +1320,522 @@ function Dashboard({ token, onLogout }) {
           <button type="submit" style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#388e3c', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #388e3c22' }}>Save</button>
         </form>
       )}
-      {/* Analytics Bar */}
-      <div style={{ display: 'flex', gap: 32, margin: '32px 40px 0 40px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 180, flex: 1 }}>
-          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Total Bookings</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#1b5e20' }}>{totalBookings}</div>
-        </div>
-        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 180, flex: 1 }}>
-          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Total Revenue</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#388e3c' }}>₹{totalRevenue}</div>
-        </div>
-        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 180, flex: 1, position: 'relative' }}>
-          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Pending Bookings</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#fbc02d' }}>{pendingCount}
-            {pendingCount > 0 && <span style={{ display: 'inline-block', background: '#fbc02d', color: '#fff', borderRadius: '50%', fontSize: 14, fontWeight: 700, padding: '2px 8px', marginLeft: 8 }}>!</span>}
+      {/* Enhanced Analytics Cards */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
+        gap: 24, 
+        margin: '32px 40px', 
+        alignItems: 'stretch'
+      }}>
+        <div style={{ 
+          background: 'rgba(255, 255, 255, 0.95)', 
+          backdropFilter: 'blur(10px)',
+          borderRadius: 20, 
+          padding: 32, 
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+          cursor: 'pointer'
+        }} 
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-8px)';
+          e.currentTarget.style.boxShadow = '0 16px 48px rgba(0, 0, 0, 0.15)';
+        }} 
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.1)';
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 20
+            }}>
+              📊
+            </div>
+            <div>
+              <div style={{ fontSize: 14, color: '#666', fontWeight: 500, marginBottom: 4 }}>Total Bookings</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#1a1a1a' }}>{totalBookings}</div>
+            </div>
           </div>
         </div>
-        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 8px #0001', padding: '18px 32px', minWidth: 220, flex: 2 }}>
-          <div style={{ fontSize: 15, color: '#888', marginBottom: 4 }}>Bookings Per Month</div>
+        
+        <div style={{ 
+          background: 'rgba(255, 255, 255, 0.95)', 
+          backdropFilter: 'blur(10px)',
+          borderRadius: 20, 
+          padding: 32, 
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+          cursor: 'pointer'
+        }} 
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-8px)';
+          e.currentTarget.style.boxShadow = '0 16px 48px rgba(0, 0, 0, 0.15)';
+        }} 
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.1)';
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 20
+            }}>
+              💰
+            </div>
+            <div>
+              <div style={{ fontSize: 14, color: '#666', fontWeight: 500, marginBottom: 4 }}>Total Revenue</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#1a1a1a' }}>₹{totalRevenue}</div>
+            </div>
+          </div>
+        </div>
+        
+        <div style={{ 
+          background: 'rgba(255, 255, 255, 0.95)', 
+          backdropFilter: 'blur(10px)',
+          borderRadius: 20, 
+          padding: 32, 
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+          cursor: 'pointer'
+        }} 
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-8px)';
+          e.currentTarget.style.boxShadow = '0 16px 48px rgba(0, 0, 0, 0.15)';
+        }} 
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.1)';
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              background: 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 20
+            }}>
+              ⏳
+            </div>
+            <div>
+              <div style={{ fontSize: 14, color: '#666', fontWeight: 500, marginBottom: 4 }}>Pending Bookings</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#1a1a1a' }}>
+                {pendingCount}
+                {pendingCount > 0 && (
+                  <span style={{ 
+                    display: 'inline-block', 
+                    background: '#ff9800', 
+                    color: '#fff', 
+                    borderRadius: '50%', 
+                    fontSize: 14, 
+                    fontWeight: 700, 
+                    padding: '4px 8px', 
+                    marginLeft: 12,
+                    animation: 'pulse 2s infinite'
+                  }}>!</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div style={{ 
+          background: 'rgba(255, 255, 255, 0.95)', 
+          backdropFilter: 'blur(10px)',
+          borderRadius: 20, 
+          padding: 32, 
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+          cursor: 'pointer'
+        }} 
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-8px)';
+          e.currentTarget.style.boxShadow = '0 16px 48px rgba(0, 0, 0, 0.15)';
+        }} 
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.1)';
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              background: 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 20
+            }}>
+              📈
+            </div>
+            <div>
+              <div style={{ fontSize: 14, color: '#666', fontWeight: 500, marginBottom: 4 }}>Monthly Trend</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>Bookings per Month</div>
+            </div>
+          </div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 60 }}>
             {monthsSorted.map(month => (
               <div key={month} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: 60 }}>
-                <div style={{ width: 18, height: bookingsPerMonth[month] * 8, background: '#43a047', borderRadius: 4, marginBottom: 2, transition: 'height 0.3s' }}></div>
-                <div style={{ fontSize: 12, color: '#888' }}>{month.slice(2)}</div>
+                <div style={{ 
+                  width: 20, 
+                  height: Math.max(bookingsPerMonth[month] * 8, 4), 
+                  background: 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)', 
+                  borderRadius: 10, 
+                  marginBottom: 8, 
+                  transition: 'height 0.3s ease'
+                }}></div>
+                <div style={{ fontSize: 12, color: '#666', fontWeight: 500 }}>{month.slice(2)}</div>
               </div>
             ))}
           </div>
         </div>
       </div>
-      {/* Search and Export Bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 18, margin: '32px 40px 0 40px' }}>
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by user, phone, or booking ID..."
-          style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #bdbdbd', fontSize: 16, flex: 2 }}
-        />
-        <button
-          onClick={() => downloadCSV(filteredBookings, 'bookings.csv')}
-          style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#388e3c', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px #388e3c22', display: 'flex', alignItems: 'center', gap: 8 }}
-        >
-          <span role="img" aria-label="download">⬇️</span> Export CSV
-        </button>
+      {/* Enhanced Search and Export Bar */}
+      <div style={{ 
+        background: 'rgba(255, 255, 255, 0.95)', 
+        backdropFilter: 'blur(10px)',
+        borderRadius: 20, 
+        padding: 24, 
+        margin: '32px 40px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+        border: '1px solid rgba(255, 255, 255, 0.2)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 300 }}>
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 Search by user, phone, or booking ID..."
+              style={{ 
+                width: '100%',
+                padding: '12px 16px', 
+                borderRadius: 12, 
+                border: '1px solid rgba(0, 0, 0, 0.1)', 
+                fontSize: 16,
+                background: 'rgba(255, 255, 255, 0.8)',
+                transition: 'all 0.3s ease'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#667eea';
+                e.target.style.boxShadow = '0 0 0 3px rgba(102, 126, 234, 0.1)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                e.target.style.boxShadow = 'none';
+              }}
+            />
+          </div>
+          <button
+            onClick={() => downloadCSV(filteredBookings, 'bookings.csv')}
+            style={{ 
+              padding: '12px 24px', 
+              borderRadius: 12, 
+              border: 'none', 
+              background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)', 
+              color: '#fff', 
+              fontWeight: 600, 
+              fontSize: 14, 
+              cursor: 'pointer', 
+              boxShadow: '0 4px 15px rgba(76, 175, 80, 0.3)',
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 8,
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 6px 20px rgba(76, 175, 80, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.3)';
+            }}
+          >
+            📥 Export CSV
+          </button>
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: 16, margin: '32px 40px 0 40px', alignItems: 'center' }}>
-        <button onClick={() => {}} style={{ padding: '8px 24px', borderRadius: 8, border: '2px solid #388e3c', background: '#e8f5e9', color: '#388e3c', fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>Table View</button>
-      </div>
-      <div style={{ padding: '0 40px 40px 40px' }}>
-        <h3 style={{ marginTop: 36, fontSize: 24, fontWeight: 700, color: '#388e3c', borderBottom: '2px solid #e0e0e0', paddingBottom: 8 }}>Your Grounds</h3>
-        {grounds.length === 0 ? <div style={{ margin: '32px 0' }}>No grounds found.</div> : (
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', margin: '24px 0 36px 0' }}>
+      {/* Enhanced Grounds Section */}
+      <div style={{ 
+        background: 'rgba(255, 255, 255, 0.95)', 
+        backdropFilter: 'blur(10px)',
+        borderRadius: 20, 
+        padding: 32, 
+        margin: '32px 40px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+        border: '1px solid rgba(255, 255, 255, 0.2)'
+      }}>
+        <h3 style={{ 
+          fontSize: 24, 
+          fontWeight: 700, 
+          color: '#1a1a1a', 
+          marginBottom: 24,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12
+        }}>
+          🏟️ Your Grounds
+        </h3>
+        {grounds.length === 0 ? (
+          <div style={{ 
+            textAlign: 'center', 
+            padding: '48px 24px', 
+            color: '#666',
+            background: 'rgba(0, 0, 0, 0.02)',
+            borderRadius: 16
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>🏏</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>No grounds found</div>
+            <div style={{ fontSize: 14, color: '#888' }}>Add your cricket grounds to start receiving bookings</div>
+          </div>
+        ) : (
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', 
+            gap: 24
+          }}>
             {grounds.map(g => (
-              <div key={g._id} style={{ minWidth: 260, flex: 1, background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24, marginBottom: 8, border: '1px solid #e0e0e0' }}>
-                <b style={{ fontSize: 20, color: '#1b5e20' }}>{g.name}</b> <span style={{ color: '#888', fontWeight: 500 }}>({g.status})</span><br />
-                <span style={{ color: '#555', fontSize: 15 }}>{g.description}</span><br />
-                <span style={{ color: '#666', fontSize: 14 }}>{g.location.address}, {g.location.cityName}</span>
+              <div key={g._id} style={{ 
+                background: 'rgba(255, 255, 255, 0.8)', 
+                borderRadius: 16, 
+                padding: 24, 
+                border: '1px solid rgba(0, 0, 0, 0.1)',
+                transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+                cursor: 'pointer'
+              }} 
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-4px)';
+                e.currentTarget.style.boxShadow = '0 8px 25px rgba(0, 0, 0, 0.15)';
+              }} 
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                  <div style={{
+                    width: 40,
+                    height: 40,
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    borderRadius: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontSize: 16,
+                    fontWeight: 700
+                  }}>
+                    🏏
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>{g.name}</div>
+                    <div style={{ 
+                      fontSize: 12, 
+                      color: g.status === 'active' ? '#4CAF50' : '#ff9800', 
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px'
+                    }}>
+                      {g.status}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 14, color: '#666', marginBottom: 12, lineHeight: 1.5 }}>{g.description}</div>
+                <div style={{ fontSize: 13, color: '#888', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  📍 {g.location.address}, {g.location.cityName}
+                </div>
               </div>
             ))}
           </div>
-        )}
-        <h3 style={{ fontSize: 24, fontWeight: 700, color: '#388e3c', borderBottom: '2px solid #e0e0e0', paddingBottom: 8, marginTop: 36 }}>All Bookings for Your Grounds</h3>
-        {/* Filter Controls */}
-        <div style={{ display: 'flex', gap: 18, margin: '24px 0 28px 0', alignItems: 'center', background: '#e8f5e9', borderRadius: 8, padding: 16, boxShadow: '0 1px 4px #0001' }}>
-          <span style={{ fontWeight: 600, color: '#388e3c', fontSize: 16 }}>Filter:</span>
-          <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500 }}>
-            <span style={{ marginRight: 6 }}>Status</span>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ marginLeft: 4, padding: 6, borderRadius: 4, border: '1px solid #bdbdbd' }}>
-              <option value="">All</option>
-              {uniqueStatuses.map(status => <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>)}
-            </select>
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500 }}>
-            <span style={{ marginRight: 6 }}>Date</span>
-            <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={{ marginLeft: 4, padding: 6, borderRadius: 4, border: '1px solid #bdbdbd' }} />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500 }}>
-            <span style={{ marginRight: 6 }}>User</span>
-            <select value={userFilter} onChange={e => setUserFilter(e.target.value)} style={{ marginLeft: 4, padding: 6, borderRadius: 4, border: '1px solid #bdbdbd' }}>
-              <option value="">All</option>
-              {uniqueUsers.map(user => <option key={user} value={user}>{user}</option>)}
-            </select>
-          </label>
-          <button onClick={() => { setStatusFilter(''); setDateFilter(''); setUserFilter(''); }} style={{ marginLeft: 18, padding: '6px 18px', borderRadius: 6, border: '1px solid #bdbdbd', background: '#fff', color: '#388e3c', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>Clear Filters</button>
-        </div>
+                  )}
+       </div>
+       
+       {/* Enhanced Bookings Section */}
+       <div style={{ 
+         background: 'rgba(255, 255, 255, 0.95)', 
+         backdropFilter: 'blur(10px)',
+         borderRadius: 20, 
+         padding: 32, 
+         margin: '32px 40px',
+         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+         border: '1px solid rgba(255, 255, 255, 0.2)'
+       }}>
+         <h3 style={{ 
+           fontSize: 24, 
+           fontWeight: 700, 
+           color: '#1a1a1a', 
+           marginBottom: 24,
+           display: 'flex',
+           alignItems: 'center',
+           gap: 12
+         }}>
+           📋 All Bookings for Your Grounds
+           {filteredBookings.length !== bookings.length && (
+             <span style={{ 
+               fontSize: 16, 
+               fontWeight: 500, 
+               color: '#666',
+               background: 'rgba(102, 126, 234, 0.1)',
+               padding: '4px 12px',
+               borderRadius: 12,
+               marginLeft: 12
+             }}>
+               Showing {filteredBookings.length} of {bookings.length} bookings
+             </span>
+           )}
+         </h3>
+                  {/* Enhanced Filter Controls */}
+          <div style={{ 
+            display: 'flex', 
+            gap: 16, 
+            margin: '24px 0 28px 0', 
+            alignItems: 'center', 
+            background: 'rgba(102, 126, 234, 0.05)', 
+            borderRadius: 16, 
+            padding: 20, 
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+            flexWrap: 'wrap'
+          }}>
+            <span style={{ 
+              fontWeight: 600, 
+              color: '#667eea', 
+              fontSize: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8
+            }}>
+              🔍 Filter:
+            </span>
+            <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500, gap: 8 }}>
+              <span>Status</span>
+              <select 
+                value={statusFilter} 
+                onChange={e => setStatusFilter(e.target.value)} 
+                style={{ 
+                  padding: '8px 12px', 
+                  borderRadius: 8, 
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  fontSize: 14,
+                  transition: 'all 0.3s ease'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#667eea';
+                  e.target.style.boxShadow = '0 0 0 3px rgba(102, 126, 234, 0.1)';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                <option value="">All</option>
+                {uniqueStatuses.map(status => <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500, gap: 8 }}>
+              <span>Date</span>
+              <input 
+                type="date" 
+                value={dateFilter} 
+                onChange={e => setDateFilter(e.target.value)} 
+                style={{ 
+                  padding: '8px 12px', 
+                  borderRadius: 8, 
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  fontSize: 14,
+                  transition: 'all 0.3s ease'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#667eea';
+                  e.target.style.boxShadow = '0 0 0 3px rgba(102, 126, 234, 0.1)';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', fontWeight: 500, gap: 8 }}>
+              <span>User</span>
+              <select 
+                value={userFilter} 
+                onChange={e => setUserFilter(e.target.value)} 
+                style={{ 
+                  padding: '8px 12px', 
+                  borderRadius: 8, 
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  fontSize: 14,
+                  transition: 'all 0.3s ease'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#667eea';
+                  e.target.style.boxShadow = '0 0 0 3px rgba(102, 126, 234, 0.1)';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                <option value="">All</option>
+                {uniqueUsers.map(user => <option key={user} value={user}>{user}</option>)}
+              </select>
+            </label>
+            <button 
+              onClick={() => { 
+                setStatusFilter(''); 
+                setDateFilter(''); 
+                setUserFilter(''); 
+                setSearch('');
+              }} 
+              style={{ 
+                padding: '8px 16px', 
+                borderRadius: 8, 
+                border: '1px solid rgba(0, 0, 0, 0.1)', 
+                background: 'rgba(255, 255, 255, 0.9)', 
+                color: '#667eea', 
+                fontWeight: 600, 
+                fontSize: 14, 
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = 'rgba(255, 255, 255, 1)';
+                e.target.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = 'rgba(255, 255, 255, 0.9)';
+                e.target.style.transform = 'translateY(0)';
+              }}
+            >
+              🗑️ Clear All Filters
+            </button>
+          </div>
         {filteredBookings.length === 0 ? (
           <div style={{ textAlign: 'center', margin: '48px 0', color: '#888' }}>
             <img src="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f3af.svg" alt="No bookings" style={{ width: 80, marginBottom: 16, opacity: 0.7 }} />
@@ -1244,19 +1923,20 @@ function Dashboard({ token, onLogout }) {
       {/* Booking Details Modal */}
       {selectedBooking && <BookingDetailsModal booking={selectedBooking} onClose={() => setSelectedBooking(null)} onStatusChange={handleStatusChange} />}
     </div>
+    </>
   );
 }
 
 function App() {
-  const [token, setToken] = useState(() => localStorage.getItem('ownerToken') || '');
+  const [token, setToken] = useState(() => localStorage.getItem('boxcric_token') || '');
 
   const handleLogin = (token) => {
     setToken(token);
-    localStorage.setItem('ownerToken', token);
+    localStorage.setItem('boxcric_token', token);
   };
   const handleLogout = () => {
     setToken('');
-    localStorage.removeItem('ownerToken');
+    localStorage.removeItem('boxcric_token');
   };
 
   return (

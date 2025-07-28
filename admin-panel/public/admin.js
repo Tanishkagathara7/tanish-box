@@ -5,7 +5,7 @@ let bookingsCache = [];
 let selectedBookingId = null;
 
 
-const BASE_API_URL = 'http://localhost:3001';
+const BASE_API_URL = 'http://localhost:4000';
 
 // Check if already logged in
 if (token) {
@@ -134,62 +134,111 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- Edit Ground Logic ---
 let editingGroundId = null;
+let currentEditingPassword = ''; // Store password during editing session
 
 window.editGround = async function(id) {
   try {
     const response = await fetch(`${BASE_API_URL}/api/admin/grounds`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const grounds = await response.json();
+    const data = await response.json();
+    
+    // Handle both array and object responses
+    const grounds = Array.isArray(data) ? data : (data.grounds || []);
     const ground = grounds.find(g => g._id === id);
-    if (!ground) return alert('Ground not found!');
+    
+    if (!ground) {
+      console.error('Ground not found:', id);
+      return alert('Ground not found!');
+    }
+    
+    // Clear previous password if editing a different ground
+    if (editingGroundId !== id) {
+        currentEditingPassword = '';
+    }
     editingGroundId = id;
+    
     // Show form
     showAddGroundForm();
+    
     // Populate fields
-    document.getElementById('groundName').value = ground.name;
-    document.getElementById('groundDescription').value = ground.description;
-    document.getElementById('groundCity').value = ground.location.cityId;
-    document.getElementById('groundAddress').value = ground.location.address;
-    document.getElementById('groundPincode').value = ground.location.pincode;
-    // Price ranges
-    const ranges = ground.price?.ranges || [{start:'',end:'',perHour:''},{start:'',end:'',perHour:''}];
+    document.getElementById('groundName').value = ground.name || '';
+    document.getElementById('groundDescription').value = ground.description || '';
+    document.getElementById('groundCity').value = ground.location?.cityId || '';
+    document.getElementById('groundAddress').value = ground.location?.address || '';
+    document.getElementById('groundPincode').value = ground.location?.pincode || '';
+    
+    // Price ranges - handle both old and new format
+    let ranges = [];
+    if (ground.price?.ranges && Array.isArray(ground.price.ranges)) {
+      ranges = ground.price.ranges;
+    } else if (ground.price?.perHour) {
+      // Convert old format to new format
+      ranges = [
+        { start: '06:00', end: '18:00', perHour: ground.price.perHour },
+        { start: '18:00', end: '06:00', perHour: ground.price.perHour }
+      ];
+    } else {
+      ranges = [{start:'',end:'',perHour:''},{start:'',end:'',perHour:''}];
+    }
+    
+    // Ensure we have at least 2 ranges
+    while (ranges.length < 2) {
+      ranges.push({start:'',end:'',perHour:''});
+    }
+    
     setDropdownOptions(document.querySelector('.price-range-row[data-idx="0"] .price-range-start'), ranges[0].start);
     setDropdownOptions(document.querySelector('.price-range-row[data-idx="0"] .price-range-end'), ranges[0].end);
     setDropdownOptions(document.querySelector('.price-range-row[data-idx="1"] .price-range-start'), ranges[1].start);
     setDropdownOptions(document.querySelector('.price-range-row[data-idx="1"] .price-range-end'), ranges[1].end);
-    document.querySelector('.price-range-row[data-idx="0"] .price-range-perHour').value = ranges[0].perHour;
-    document.querySelector('.price-range-row[data-idx="1"] .price-range-perHour').value = ranges[1].perHour;
+    document.querySelector('.price-range-row[data-idx="0"] .price-range-perHour').value = ranges[0].perHour || '';
+    document.querySelector('.price-range-row[data-idx="1"] .price-range-perHour').value = ranges[1].perHour || '';
+    
     // Discount
     document.getElementById('groundDiscount').value = ground.price?.discount || 0;
+    
     // Images
-    document.getElementById('groundImage1').value = ground.images[0]?.url || '';
-    document.getElementById('groundImage2').value = ground.images[1]?.url || '';
-    document.getElementById('groundImage3').value = ground.images[2]?.url || '';
+    const images = Array.isArray(ground.images) ? ground.images : [];
+    document.getElementById('groundImage1').value = images[0]?.url || '';
+    document.getElementById('groundImage2').value = images[1]?.url || '';
+    document.getElementById('groundImage3').value = images[2]?.url || '';
+    
     // Features
-    document.getElementById('groundPitchType').value = ground.features.pitchType;
-    document.getElementById('groundCapacity').value = ground.features.capacity;
-    document.getElementById('groundLighting').checked = ground.features.lighting;
-    document.getElementById('groundParking').checked = ground.features.parking;
-    document.getElementById('groundChangeRoom').checked = ground.features.changeRoom;
-    document.getElementById('groundWashroom').checked = ground.features.washroom;
-    document.getElementById('groundCafeteria').checked = ground.features.cafeteria;
-    document.getElementById('groundEquipment').checked = ground.features.equipment;
+    const features = ground.features || {};
+    document.getElementById('groundPitchType').value = features.pitchType || '';
+    document.getElementById('groundCapacity').value = features.capacity || '';
+    document.getElementById('groundLighting').checked = features.lighting || false;
+    document.getElementById('groundParking').checked = features.parking || false;
+    document.getElementById('groundChangeRoom').checked = features.changeRoom || false;
+    document.getElementById('groundWashroom').checked = features.washroom || false;
+    document.getElementById('groundCafeteria').checked = features.cafeteria || false;
+    document.getElementById('groundEquipment').checked = features.equipment || false;
+    
     // Owner
-    document.getElementById('ownerName').value = ground.owner.name;
-    document.getElementById('ownerEmail').value = ground.owner.email;
-    document.getElementById('ownerContact').value = ground.owner.contact;
-    document.getElementById('ownerPassword').value = ground.owner.password || '';
-    document.getElementById('ownerUserId').value = ground.owner.userId || '';
+    const owner = ground.owner || {};
+    document.getElementById('ownerName').value = owner.name || '';
+    document.getElementById('ownerEmail').value = owner.email || '';
+    document.getElementById('ownerContact').value = owner.contact || '';
+    // Restore password from current editing session if available, otherwise keep empty
+    document.getElementById('ownerPassword').value = currentEditingPassword || '';
+    document.getElementById('ownerUserId').value = owner.userId || '';
+    
     // Rating
-    document.getElementById('groundRating').value = ground.rating?.average || 0;
-    document.getElementById('groundRatingCount').value = ground.rating?.count || 0;
+    const rating = ground.rating || {};
+    document.getElementById('groundRating').value = rating.average || 0;
+    document.getElementById('groundRatingCount').value = rating.count || 0;
+    
     // Policies
-    document.getElementById('cancellationPolicy').value = ground.policies.cancellation || '';
-    document.getElementById('advanceBooking').value = ground.policies.advanceBooking || 30;
-    document.getElementById('groundRules').value = (ground.policies.rules || []).join('\n');
+    const policies = ground.policies || {};
+    document.getElementById('cancellationPolicy').value = policies.cancellation || '';
+    document.getElementById('advanceBooking').value = policies.advanceBooking || 30;
+    document.getElementById('groundRules').value = Array.isArray(policies.rules) ? policies.rules.join('\n') : '';
+    
     // Change submit button text
     document.querySelector('#groundForm button[type="submit"]').textContent = 'Update Ground';
+    
+    console.log('Ground loaded for editing:', ground);
   } catch (err) {
-    alert('Error loading ground for edit');
+    console.error('Error loading ground for edit:', err);
+    alert('Error loading ground for edit: ' + err.message);
   }
 };
 
@@ -276,6 +325,11 @@ groundForm.addEventListener('submit', async (e) => {
         }
     });
     try {
+        // Store the current password value if we're editing
+        if (editingGroundId) {
+            currentEditingPassword = document.getElementById('ownerPassword').value;
+        }
+        
         let response, data;
         if (editingGroundId) {
             response = await fetch(`${BASE_API_URL}/api/admin/grounds/${editingGroundId}`, {
@@ -300,6 +354,8 @@ groundForm.addEventListener('submit', async (e) => {
         }
         if (response.ok) {
             alert(editingGroundId ? 'Ground updated successfully!' : 'Ground added successfully!');
+            // Clear the stored password after successful update
+            currentEditingPassword = '';
             hideAddGroundForm();
             loadGrounds();
             editingGroundId = null;
@@ -316,13 +372,29 @@ groundForm.addEventListener('submit', async (e) => {
 const originalHideAddGroundForm = hideAddGroundForm;
 hideAddGroundForm = function() {
   editingGroundId = null;
+  currentEditingPassword = ''; // Clear stored password when hiding form
   document.querySelector('#groundForm button[type="submit"]').textContent = 'Add Ground';
   originalHideAddGroundForm();
 };
 
+// Add event listener to password field to store changes
+document.addEventListener('DOMContentLoaded', function() {
+  const passwordField = document.getElementById('ownerPassword');
+  if (passwordField) {
+    passwordField.addEventListener('input', function() {
+      if (editingGroundId) {
+        currentEditingPassword = this.value;
+        console.log('Password stored for editing session:', currentEditingPassword ? '***' : '(empty)');
+      }
+    });
+  }
+});
+
 async function loadGrounds() {
     try {
-        const response = await fetch('http://localhost:3001/api/admin/grounds');
+        const response = await fetch(`${BASE_API_URL}/api/admin/grounds`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         
         if (!response.ok) {
             if (response.status === 401) {
@@ -335,31 +407,49 @@ async function loadGrounds() {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        let grounds = await response.json();
+        let data = await response.json();
+        console.log('Grounds response:', data);
         
-        // Ensure grounds is an array
-        if (!Array.isArray(grounds)) {
-            if (grounds && Array.isArray(grounds.grounds)) {
-                grounds = grounds.grounds;
-            } else {
-                console.error('Expected array of grounds, got:', grounds);
-                return;
-            }
+        // Handle different response formats
+        let grounds = [];
+        if (Array.isArray(data)) {
+            grounds = data;
+        } else if (data && Array.isArray(data.grounds)) {
+            grounds = data.grounds;
+        } else if (data && data.success && Array.isArray(data.grounds)) {
+            grounds = data.grounds;
+        } else {
+            console.error('Unexpected grounds response format:', data);
+            return;
         }
         
+        console.log('Processed grounds:', grounds);
+        
         const tbody = document.getElementById('groundsTableBody');
+        if (!tbody) {
+            console.error('Grounds table body not found');
+            return;
+        }
+        
         tbody.innerHTML = '';
         
         grounds.forEach(ground => {
             const row = document.createElement('tr');
             let priceHtml = '';
-            if (Array.isArray(ground.price?.ranges)) {
-              ground.price.ranges.forEach(range => {
-                priceHtml += `<div>${range.start} - ${range.end}: ₹${range.perHour}</div>`;
-              });
+            
+            // Handle different price formats
+            if (Array.isArray(ground.price?.ranges) && ground.price.ranges.length > 0) {
+                ground.price.ranges.forEach(range => {
+                    if (range.start && range.end && range.perHour) {
+                        priceHtml += `<div>${range.start} - ${range.end}: ₹${range.perHour}</div>`;
+                    }
+                });
+            } else if (ground.price?.perHour) {
+                priceHtml = `<div>₹${ground.price.perHour}/hour</div>`;
             } else {
-              priceHtml = '<div>No pricing info</div>';
+                priceHtml = '<div>No pricing info</div>';
             }
+            
             const ratingHtml = ground.rating?.average ? 
                 `<div class="rating-display">
                     <span class="rating-star">★</span>
@@ -369,11 +459,11 @@ async function loadGrounds() {
                 '<span style="color: #666;">No rating</span>';
             
             row.innerHTML = `
-                <td>${ground.name}</td>
-                <td>${ground.location?.cityName || 'N/A'}</td>
+                <td>${ground.name || 'N/A'}</td>
+                <td>${ground.location?.cityName || ground.location?.cityId || 'N/A'}</td>
                 <td>${priceHtml}</td>
                 <td>${ratingHtml}</td>
-                <td><span class="status ${ground.status}">${ground.status}</span></td>
+                <td><span class="status ${ground.status || 'pending'}">${ground.status || 'pending'}</span></td>
                 <td>
                     <button onclick="editGround('${ground._id}')" class="btn-small">Edit</button>
                     <button onclick="deleteGround('${ground._id}')" class="btn-small btn-danger">Delete</button>
@@ -381,6 +471,8 @@ async function loadGrounds() {
             `;
             tbody.appendChild(row);
         });
+        
+        console.log('Grounds table updated with', grounds.length, 'grounds');
     } catch (error) {
         console.error('Error loading grounds:', error);
         alert('Error loading grounds: ' + error.message);
@@ -485,7 +577,14 @@ async function loadLocations() {
             }
         }
         
+        console.log('Loaded locations:', locations);
+        
         const dropdown = document.getElementById('groundCity');
+        if (!dropdown) {
+            console.error('City dropdown not found');
+            return;
+        }
+        
         dropdown.innerHTML = '<option value="">Select City</option>';
         
         locations.forEach(location => {
@@ -494,6 +593,8 @@ async function loadLocations() {
             option.textContent = `${location.name}, ${location.state}`;
             dropdown.appendChild(option);
         });
+        
+        console.log('City dropdown populated with', locations.length, 'cities');
     } catch (error) {
         console.error('Error loading cities:', error);
         alert('Error loading cities: ' + error.message);
@@ -529,7 +630,14 @@ async function populateCityDropdown() {
             }
         }
         
+        console.log('Populating city dropdown with locations:', locations);
+        
         const dropdown = document.getElementById('groundCity');
+        if (!dropdown) {
+            console.error('City dropdown not found');
+            return;
+        }
+        
         dropdown.innerHTML = '<option value="">Select City</option>';
         
         locations.forEach(location => {
@@ -538,6 +646,8 @@ async function populateCityDropdown() {
             option.textContent = `${location.name}, ${location.state}`;
             dropdown.appendChild(option);
         });
+        
+        console.log('City dropdown populated with', locations.length, 'cities');
     } catch (error) {
         console.error('Error loading cities:', error);
         alert('Error loading cities: ' + error.message);
@@ -623,25 +733,27 @@ function renderBookingsTable(bookings) {
 function formatTime12h(time24h) {
   // Add validation to ensure we're getting a proper time format
   if (!time24h || typeof time24h !== 'string') {
-    console.error('Invalid time format:', time24h);
+    console.warn('Invalid time format:', time24h);
     return time24h;
   }
   
   // Check if it's a time range (contains '-')
   if (time24h.includes('-')) {
-    console.error('Time range passed to formatTime12h:', time24h);
-    return time24h; // Return as-is if it's a range
+    console.warn('Time range passed to formatTime12h, extracting start time:', time24h);
+    // Extract the start time from the range
+    const startTime = time24h.split('-')[0];
+    return formatTime12h(startTime); // Recursively format the start time
   }
   
   const [hours, minutes] = time24h.split(':');
   if (!hours || !minutes) {
-    console.error('Invalid time format (missing hours or minutes):', time24h);
+    console.warn('Invalid time format (missing hours or minutes):', time24h);
     return time24h;
   }
   
   const hour = parseInt(hours, 10);
   if (isNaN(hour) || hour < 0 || hour > 23) {
-    console.error('Invalid hour:', hour, 'from time:', time24h);
+    console.warn('Invalid hour:', hour, 'from time:', time24h);
     return time24h;
   }
   
@@ -688,10 +800,12 @@ function resetBookingForm() {
 
 async function populateBookingGrounds() {
   try {
-    console.log('Fetching grounds from main server...');
+    console.log('Fetching grounds for booking...');
     
-    // Connect directly to main server (no auth needed for grounds endpoint)
-    const response = await fetch('http://localhost:3001/api/admin/grounds');
+    // Use admin panel server with auth
+    const response = await fetch(`${BASE_API_URL}/api/admin/grounds`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -700,8 +814,18 @@ async function populateBookingGrounds() {
     const data = await response.json();
     console.log('Grounds API response:', data);
     
-    // Check if response is an array (direct grounds response) or has success property
-    const grounds = Array.isArray(data) ? data : (data.success ? data.grounds : []);
+    // Handle different response formats
+    let grounds = [];
+    if (Array.isArray(data)) {
+      grounds = data;
+    } else if (data && Array.isArray(data.grounds)) {
+      grounds = data.grounds;
+    } else if (data && data.success && Array.isArray(data.grounds)) {
+      grounds = data.grounds;
+    } else {
+      console.error('Unexpected grounds response format:', data);
+      throw new Error('Invalid grounds response format');
+    }
     
     console.log('Processed grounds:', grounds);
     console.log('Number of grounds found:', grounds ? grounds.length : 0);
@@ -711,12 +835,17 @@ async function populateBookingGrounds() {
     }
     
     const groundSelect = document.getElementById('bookingGroundId');
+    if (!groundSelect) {
+      console.error('Booking ground select not found');
+      return;
+    }
+    
     groundSelect.innerHTML = '<option value="">Select Ground</option>';
     
     grounds.forEach(ground => {
       const option = document.createElement('option');
       option.value = ground._id;
-      option.textContent = ground.name;
+      option.textContent = ground.name || 'Unnamed Ground';
       groundSelect.appendChild(option);
       console.log('Added ground option:', ground.name, 'with ID:', ground._id);
     });
@@ -796,18 +925,31 @@ async function updateBookingTimeSlots() {
     const url = `http://localhost:3001/api/admin/bookings/ground/${groundId}/${date}`;
     console.log('Calling admin availability endpoint:', url);
     const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
     const data = await response.json();
     console.log('Availability API response:', data);
     
     let availableSlots = [];
-    if (data.success && data.availability) {
-      availableSlots = data.availability.availableSlots || [];
+    if (data.success && data.availability && Array.isArray(data.availability.availableSlots)) {
+      availableSlots = data.availability.availableSlots;
       console.log('Using server-provided available slots:', availableSlots);
+      
+      // Validate that we're getting individual times, not ranges
+      const hasRanges = availableSlots.some(slot => slot.includes('-'));
+      if (hasRanges) {
+        console.warn('Server returned time ranges instead of individual times, using fallback');
+        availableSlots = getAll24hTimes();
+      }
     } else {
-      console.log('No server data, using fallback 24h times');
+      console.log('No valid server data, using fallback 24h times');
       availableSlots = getAll24hTimes();
     }
     console.log('Available slots from server:', availableSlots);
+    console.log('Sample slots (first 5):', availableSlots.slice(0, 5));
     
     // Filter out past times for today
     const now = new Date();
@@ -826,7 +968,7 @@ async function updateBookingTimeSlots() {
     availableSlots.forEach(time => {
       const option = document.createElement('option');
       option.value = time;
-      console.log('Processing time slot:', time, 'Type:', typeof time);
+      console.log('Processing time slot:', time, 'Type:', typeof time, 'Length:', time.length);
       const formattedTime = formatTime12h(time);
       option.textContent = formattedTime;
       console.log(`Time slot: "${time}" -> formatted: "${formattedTime}"`);

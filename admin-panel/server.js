@@ -18,6 +18,121 @@ const __dirname = dirname(__filename);
 const MONGO_URI = 'mongodb+srv://rag123456:rag123456@cluster0.qipvo.mongodb.net/boxcricket?retryWrites=true&w=majority'; // Atlas URI, using boxcricket DB
 const JWT_SECRET = 'adminpanel_secret';
 
+// --- MODELS ---
+// Define schemas inline since we can't import from main server
+const locationSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  state: { type: String, required: true },
+  latitude: { type: Number, required: true },
+  longitude: { type: Number, required: true },
+  popular: { type: Boolean, default: false }
+});
+
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  phone: { type: String, required: true },
+  password: { type: String, required: true },
+  role: { type: String, enum: ['user', 'admin', 'ground_owner'], default: 'user' },
+  isVerified: { type: Boolean, default: false }
+});
+
+const groundSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  description: { type: String },
+  location: {
+    address: String,
+    cityId: String,
+    cityName: String,
+    state: String,
+    latitude: Number,
+    longitude: Number,
+    pincode: String
+  },
+  price: {
+    perHour: Number,
+    currency: { type: String, default: 'INR' },
+    discount: { type: Number, default: 0 },
+    ranges: [{
+      start: String,
+      end: String,
+      perHour: Number
+    }]
+  },
+  images: [{
+    url: String,
+    alt: String,
+    isPrimary: { type: Boolean, default: false }
+  }],
+  amenities: [String],
+  features: {
+    pitchType: String,
+    capacity: Number,
+    lighting: Boolean,
+    parking: Boolean,
+    changeRoom: Boolean,
+    washroom: Boolean,
+    cafeteria: Boolean,
+    equipment: Boolean
+  },
+  owner: {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    name: String,
+    contact: String,
+    email: String,
+    verified: { type: Boolean, default: false }
+  },
+  rating: {
+    average: { type: Number, default: 0 },
+    count: { type: Number, default: 0 },
+    reviews: []
+  },
+  status: { type: String, enum: ['active', 'inactive', 'pending'], default: 'pending' },
+  isVerified: { type: Boolean, default: false }
+}, { timestamps: true });
+
+const bookingSchema = new mongoose.Schema({
+  bookingId: { type: String, required: true, unique: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  groundId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ground', required: true },
+  bookingDate: { type: Date, required: true },
+  timeSlot: {
+    startTime: String,
+    endTime: String,
+    duration: Number
+  },
+  playerDetails: {
+    teamName: String,
+    playerCount: Number,
+    contactPerson: {
+      name: String,
+      phone: String,
+      email: String
+    },
+    requirements: String
+  },
+  pricing: {
+    baseAmount: Number,
+    discount: Number,
+    convenienceFee: Number,
+    totalAmount: Number,
+    currency: { type: String, default: 'INR' }
+  },
+  status: { type: String, enum: ['pending', 'confirmed', 'cancelled', 'completed'], default: 'pending' },
+  payment: {
+    method: String,
+    status: String,
+    transactionId: String
+  }
+}, { timestamps: true });
+
+// Create models
+const Location = mongoose.model('Location', locationSchema);
+const User = mongoose.model('User', userSchema);
+const Ground = mongoose.model('Ground', groundSchema);
+const Booking = mongoose.model('Booking', bookingSchema);
+
 // --- EXPRESS APP ---
 const app = express();
 app.use(cors());
@@ -68,137 +183,129 @@ app.get('/api/admin/grounds', adminAuth, async (req, res) => {
 
 app.post('/api/admin/grounds', adminAuth, async (req, res) => {
   try {
-    // Validate cityId
-    const city = await Location.findOne({ id: req.body.location.cityId });
-    if (!city) return res.status(400).json({ message: 'Invalid cityId' });
-    req.body.location = {
-      cityId: city.id,
-      cityName: city.name,
-      state: city.state,
-      latitude: city.latitude,
-      longitude: city.longitude,
-      address: req.body.location.address,
-      pincode: req.body.location.pincode
-    };
-
-    // Create or update owner in User model
-    let user = await User.findOne({ email: req.body.owner.email });
-    if (!user) {
-      user = await User.create({
-        name: req.body.owner.name,
-        email: req.body.owner.email,
-        phone: req.body.owner.contact,
-        password: req.body.owner.password,
-        role: 'ground_owner',
-        isVerified: true
-      });
-    } else {
-      user.name = req.body.owner.name;
-      user.phone = req.body.owner.contact;
-      if (req.body.owner.password) user.password = req.body.owner.password;
-      user.isVerified = true;
-      await user.save();
-    }
-
-    // Set userId in ground owner
-    const groundData = {
-      ...req.body,
-      status: "active",
-      isVerified: true,
-      owner: {
-        ...req.body.owner,
-        userId: user._id,
+    // Forward the request to the main server
+    const response = await fetch('http://localhost:3001/api/admin/grounds', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': req.headers.authorization
       },
-      availability: req.body.availability || {
-        timeSlots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"],
-        blockedDates: [],
-        weeklySchedule: {
-          monday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
-          tuesday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
-          wednesday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
-          thursday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
-          friday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
-          saturday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] },
-          sunday: { isOpen: true, slots: ["06:00-07:00", "07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00", "13:00-14:00", "14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00", "18:00-19:00", "19:00-20:00", "20:00-21:00", "21:00-22:00"] }
-        }
-      }
-    };
-
-    const ground = await Ground.create(groundData);
-    res.json(ground);
-  } catch (err) {
-    console.error('Error creating ground:', err);
-    res.status(400).json({ message: err.message });
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error creating ground:', error);
+    res.status(500).json({ message: 'Failed to create ground' });
   }
 });
 
 app.put('/api/admin/grounds/:id', adminAuth, async (req, res) => {
   try {
-    // Validate cityId
-    const city = await Location.findOne({ id: req.body.location.cityId });
-    if (!city) return res.status(400).json({ message: 'Invalid cityId' });
-    req.body.location.cityName = city.name;
-    req.body.location.state = city.state;
-    req.body.location.latitude = city.latitude;
-    req.body.location.longitude = city.longitude;
-
-    // Update owner password if provided
-    if (req.body.owner && req.body.owner.password) {
-      let user = null;
-      if (req.body.owner.userId && req.body.owner.userId !== 'undefined' && req.body.owner.userId !== '') {
-        user = await User.findById(req.body.owner.userId);
-      }
-      if (!user && req.body.owner.email) {
-        user = await User.findOne({ email: req.body.owner.email });
-      }
-      if (user) {
-        user.password = req.body.owner.password; // Save as plain text
-        await user.save();
-      }
-      // Remove password from owner object before updating ground
-      delete req.body.owner.password;
-      delete req.body.owner.userId;
-    }
-
-    const ground = await Ground.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.json(ground);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
+    // Forward the request to the main server
+    const response = await fetch(`http://localhost:3001/api/admin/grounds/${req.params.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': req.headers.authorization
+      },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error updating ground:', error);
+    res.status(500).json({ message: 'Failed to update ground' });
   }
 });
 
 app.delete('/api/admin/grounds/:id', adminAuth, async (req, res) => {
-  await Ground.findByIdAndDelete(req.params.id);
-  res.json({ success: true });
+  try {
+    // Forward the request to the main server
+    const response = await fetch(`http://localhost:3001/api/admin/grounds/${req.params.id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': req.headers.authorization
+      }
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error deleting ground:', error);
+    res.status(500).json({ message: 'Failed to delete ground' });
+  }
 });
 
 // --- Location CRUD Endpoints ---
 app.get('/api/admin/locations', adminAuth, async (req, res) => {
-  const locations = await Location.find();
-  res.json(locations);
+  try {
+    // Forward the request to the main server
+    const response = await fetch('http://localhost:3001/api/admin/locations', {
+      headers: {
+        'Authorization': req.headers.authorization
+      }
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error fetching locations:', error);
+    res.status(500).json({ message: 'Failed to fetch locations' });
+  }
 });
 
 app.post('/api/admin/locations', adminAuth, async (req, res) => {
   try {
-    const location = await Location.create(req.body);
-    res.json(location);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
+    // Forward the request to the main server
+    const response = await fetch('http://localhost:3001/api/admin/locations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': req.headers.authorization
+      },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error creating location:', error);
+    res.status(500).json({ message: 'Failed to create location' });
   }
 });
 
 app.put('/api/admin/locations/:id', adminAuth, async (req, res) => {
   try {
-    const location = await Location.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
-    res.json(location);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
+    // Forward the request to the main server
+    const response = await fetch(`http://localhost:3001/api/admin/locations/${req.params.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': req.headers.authorization
+      },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error updating location:', error);
+    res.status(500).json({ message: 'Failed to update location' });
   }
 });
 
 app.delete('/api/admin/locations/:id', adminAuth, async (req, res) => {
-  await Location.findOneAndDelete({ id: req.params.id });
-  res.json({ success: true });
+  try {
+    // Forward the request to the main server
+    const response = await fetch(`http://localhost:3001/api/admin/locations/${req.params.id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': req.headers.authorization
+      }
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error deleting location:', error);
+    res.status(500).json({ message: 'Failed to delete location' });
+  }
 });
 
 // --- Admin: Get All Bookings (with user and ground names) ---
@@ -215,7 +322,7 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
 });
 
 // --- Admin: Get Ground Availability ---
-app.get('/api/bookings/ground/:groundId/:date', async (req, res) => {
+app.get('/api/admin/bookings/ground/:groundId/:date', async (req, res) => {
   try {
     const { groundId, date } = req.params;
     

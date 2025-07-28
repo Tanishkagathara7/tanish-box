@@ -3,9 +3,6 @@ import {
   User,
   Bell,
   Shield,
-  Globe,
-  Moon,
-  Sun,
   Smartphone,
   Mail,
 } from "lucide-react";
@@ -15,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -28,17 +25,16 @@ const Settings = () => {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState({
     email: true,
     push: true,
     sms: false,
     marketing: false,
   });
-  const [language, setLanguage] = useState("english");
   const [openChangePassword, setOpenChangePassword] = useState(false);
   const [openDownloadData, setOpenDownloadData] = useState(false);
   const [openDeleteAccount, setOpenDeleteAccount] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Load user data from AuthContext on mount
   useEffect(() => {
@@ -50,8 +46,6 @@ const Settings = () => {
       setPhone(user.phone || "");
       if (user.preferences) {
         setNotifications(user.preferences.notifications || notifications);
-        setLanguage(user.preferences.language || language);
-        setDarkMode(user.preferences.darkMode || darkMode);
       }
     }
   }, [user]);
@@ -60,22 +54,29 @@ const Settings = () => {
     setNotifications((prev) => ({ ...prev, [key]: value }));
   };
 
+
+
   // Save handler updates user in AuthContext (and can call API)
   const handleSave = async () => {
-    const updatedUser = {
-      name: `${firstName} ${lastName}`.trim(),
-      email,
-      phone,
-      preferences: {
-        notifications,
-        language,
-        darkMode,
-        currency: user?.preferences?.currency || "INR",
-      },
-    };
-    updateUser(updatedUser);
-    // Optionally, call your backend API here
-    alert("Settings saved! (API integration placeholder)");
+    setIsSaving(true);
+    try {
+      const updatedUser = {
+        name: `${firstName} ${lastName}`.trim(),
+        email,
+        phone,
+        preferences: {
+          notifications,
+        },
+      };
+      updateUser(updatedUser);
+      
+      // Show success message
+      alert("Settings saved successfully!");
+    } catch (error) {
+      alert("Error saving settings. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Cancel handler resets to current user values
@@ -88,8 +89,6 @@ const Settings = () => {
       setPhone(user.phone || "");
       if (user.preferences) {
         setNotifications(user.preferences.notifications || notifications);
-        setLanguage(user.preferences.language || language);
-        setDarkMode(user.preferences.darkMode || darkMode);
       }
     }
   };
@@ -140,8 +139,12 @@ const Settings = () => {
               <Separator />
 
               <div className="flex space-x-2">
-                <Button className="bg-cricket-green hover:bg-cricket-green/90" onClick={handleSave}>
-                  Save Changes
+                <Button 
+                  className="bg-cricket-green hover:bg-cricket-green/90" 
+                  onClick={handleSave}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Saving..." : "Save Changes"}
                 </Button>
                 <Button variant="outline" onClick={handleCancel}>Cancel</Button>
               </div>
@@ -327,114 +330,9 @@ const Settings = () => {
             </CardContent>
           </Card>
 
-          {/* App Preferences */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Globe className="w-5 h-5 text-cricket-green" />
-                <span>App Preferences</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    {darkMode ? (
-                      <Moon className="w-5 h-5 text-gray-500" />
-                    ) : (
-                      <Sun className="w-5 h-5 text-yellow-500" />
-                    )}
-                    <div>
-                      <Label className="font-medium">Dark Mode</Label>
-                      <p className="text-sm text-gray-600">
-                        Switch to dark theme for better night viewing
-                      </p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={darkMode}
-                    onCheckedChange={setDarkMode}
-                    className="data-[state=checked]:bg-cricket-green"
-                  />
-                </div>
 
-                <div className="space-y-3">
-                  <Label className="font-medium">Language</Label>
-                  <RadioGroup value={language} onValueChange={setLanguage}>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="english" id="english" />
-                      <Label htmlFor="english" className="cursor-pointer">
-                        English
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="hindi" id="hindi" />
-                      <Label htmlFor="hindi" className="cursor-pointer">
-                        Hindi (हिंदी)
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="tamil" id="tamil" />
-                      <Label htmlFor="tamil" className="cursor-pointer">
-                        Tamil (தமிழ்)
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="telugu" id="telugu" />
-                      <Label htmlFor="telugu" className="cursor-pointer">
-                        Telugu (తెలుగు)
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </div>
 
-                <div className="space-y-3">
-                  <Label className="font-medium">Default Location</Label>
-                  <Input placeholder="Choose your default city" />
-                </div>
 
-                <div className="space-y-3">
-                  <Label className="font-medium">Currency</Label>
-                  <RadioGroup defaultValue="inr">
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="inr" id="inr" />
-                      <Label htmlFor="inr" className="cursor-pointer">
-                        Indian Rupee (₹)
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="usd" id="usd" />
-                      <Label htmlFor="usd" className="cursor-pointer">
-                        US Dollar ($)
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Support */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Need Help?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-gray-600">
-                If you have any questions or need assistance, our support team
-                is here to help.
-              </p>
-              <div className="flex space-x-2">
-                <Button
-                  variant="outline"
-                  className="text-cricket-green border-cricket-green hover:bg-cricket-green/10"
-                >
-                  Contact Support
-                </Button>
-                <Button variant="outline">View Help Center</Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

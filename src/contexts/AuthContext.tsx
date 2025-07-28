@@ -38,9 +38,10 @@ interface User {
       sms: boolean;
       marketing: boolean;
     };
-    language: string;
-    currency: string;
-    darkMode: boolean;
+    language?: string;
+    currency?: string;
+    darkMode?: boolean;
+    defaultLocation?: string;
   };
 }
 
